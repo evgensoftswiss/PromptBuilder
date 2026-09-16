@@ -278,7 +278,7 @@ function saveTemplateFile() {
   syncTemplateTaxonomyToBuilder('category', templateCategory(PROMPT_TEMPLATES[selectedTemplateIndex] || {}));
   syncTemplateTaxonomyToBuilder('agent', PROMPT_TEMPLATES[selectedTemplateIndex]?.agent || '');
   alignTemplateFiltersToCurrentTemplate();
-  localStorage.setItem('pb-prompt-templates-v2', JSON.stringify({version:'0.1.57', project:'Prompt Builder', templates:PROMPT_TEMPLATES}));
+  localStorage.setItem('pb-prompt-templates-v2', JSON.stringify({version:'0.1.58', project:'Prompt Builder', templates:PROMPT_TEMPLATES}));
   const configSnapshot = JSON.parse(JSON.stringify(CONFIG));
   if (Array.isArray(configSnapshot?.fields)) configSnapshot.fields.forEach(field => { if (field.id === 'section' || field.id === 'category' || field.id === 'aiTool') delete field.options; });
   if (configSnapshot?.defaults) { delete configSnapshot.defaults.category; delete configSnapshot.defaults.aiTool; }
@@ -333,6 +333,9 @@ function deleteTemplate() {
   if (!confirm('Delete this template?')) return;
   const deletedIndex = selectedTemplateIndex;
   PROMPT_TEMPLATES.splice(deletedIndex, 1);
+  try {
+    localStorage.setItem('pb-prompt-templates-v2', JSON.stringify({version:'0.1.58', project:'Prompt Builder', templates:PROMPT_TEMPLATES}));
+  } catch (error) { console.warn('[Prompt Builder] Could not persist deleted template:', error); }
   const visible = filteredTemplateIndexes();
   if (visible.length) {
     const prior = visible.filter(({i}) => i < deletedIndex);
@@ -373,13 +376,36 @@ async function loadTemplates() {
 
     if (Array.isArray(stored?.templates)) {
       const localTemplates = stored.templates.map(normalize);
-      const userTemplates = localTemplates.filter(item => item.CanBeDeleted === true);
-      const protectedLocal = localTemplates.filter(item => item.CanBeDeleted !== true);
+      const repairFromBaseline = (item) => {
+        const match = baselineTemplates.find(baseItem =>
+          String(baseItem.prompt_template || '') === String(item.prompt_template || '')
+        );
+        if (!match) return item;
+        return {
+          ...item,
+          section: item.section || match.section,
+          category: item.category || match.category,
+          agent: item.agent || match.agent,
+          context: item.context || match.context,
+          effectiveness_rating: item.effectiveness_rating || match.effectiveness_rating,
+          evaluation: item.evaluation || match.evaluation
+        };
+      };
+      const repairedLocalTemplates = localTemplates.map(repairFromBaseline);
+      const userTemplates = repairedLocalTemplates.filter(item => item.CanBeDeleted === true);
+      const protectedLocal = repairedLocalTemplates.filter(item => item.CanBeDeleted !== true);
       const merged = baselineTemplates.map(baseItem => {
         const match = protectedLocal.find(localItem =>
           String(localItem.prompt_template || '') === String(baseItem.prompt_template || '')
         );
-        return match ? { ...baseItem, ...match, CanBeDeleted: false, section: baseItem.section, category: baseItem.category, agent: baseItem.agent } : baseItem;
+        return match ? {
+          ...baseItem,
+          ...match,
+          CanBeDeleted: false,
+          section: match.section || baseItem.section,
+          category: match.category || baseItem.category,
+          agent: match.agent || baseItem.agent
+        } : baseItem;
       });
       const baselineSignatures = new Set(merged.map(item => JSON.stringify({section:item.section,category:item.category,agent:item.agent,prompt_template:item.prompt_template||'',context:item.context||''})));
       for (const item of userTemplates) {
@@ -387,7 +413,7 @@ async function loadTemplates() {
         if (!baselineSignatures.has(sig)) { merged.push(item); baselineSignatures.add(sig); }
       }
       PROMPT_TEMPLATES = merged;
-      localStorage.setItem('pb-prompt-templates-v2', JSON.stringify({version:'0.1.57', project:'Prompt Builder', templates:PROMPT_TEMPLATES}));
+      localStorage.setItem('pb-prompt-templates-v2', JSON.stringify({version:'0.1.58', project:'Prompt Builder', templates:PROMPT_TEMPLATES}));
     } else {
       PROMPT_TEMPLATES = baselineTemplates;
     }
