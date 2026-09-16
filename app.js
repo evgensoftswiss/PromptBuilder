@@ -18,7 +18,40 @@ function templateStars(value) {
   return '★'.repeat(score) + '☆'.repeat(Math.max(0, 5 - score));
 }
 function templateValues(key) {
-  return ['All', ...new Set(PROMPT_TEMPLATES.map(item => String(item[key] || (key === 'category' ? item.section : '') || '').trim()).filter(Boolean))];
+  const values = uniqueTemplateValues(key);
+  return ['All', ...values];
+}
+
+function templateTaxonomyValues(key) {
+  return uniqueTemplateValues(key);
+}
+
+function refreshBuilderTaxonomy() {
+  if (!CONFIG?.fields || !Array.isArray(PROMPT_TEMPLATES)) return;
+  const categories = templateTaxonomyValues('category');
+  const agents = templateTaxonomyValues('agent');
+  const categoryField = CONFIG.fields.find(f => f.id === 'category');
+  const aiToolField = CONFIG.fields.find(f => f.id === 'aiTool');
+  if (categoryField) {
+    categoryField.options = categories.map(value => ({ value, label: value }));
+  }
+  if (aiToolField) {
+    aiToolField.options = agents.map(value => ({ value, label: value }));
+  }
+  const categorySelect = $('field-category');
+  const aiToolSelect = $('field-aiTool');
+  const setSelectOptions = (select, values) => {
+    if (!select) return;
+    const current = select.value;
+    select.innerHTML = values.map(value => `<option value="${escapeAttr(value)}">${escapeHtml(value)}</option>`).join('');
+    if (current && values.includes(current)) select.value = current;
+    else if (values.length) select.value = values[0];
+  };
+  setSelectOptions(categorySelect, categories);
+  setSelectOptions(aiToolSelect, agents);
+  if (categorySelect) categorySelect.dispatchEvent(new Event('change', { bubbles: true }));
+  if (aiToolSelect) aiToolSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  updateOpenToolButton();
 }
 function fillTemplateFilter(id, key, preserve = '') {
   const select = $(id);
@@ -75,7 +108,10 @@ function fillTemplateMetaSelect(id, key, current = '') {
 }
 function persistConfigToDisk() {
   try {
-    localStorage.setItem('pb-builder-config-v1', JSON.stringify(CONFIG));
+    const snapshot = JSON.parse(JSON.stringify(CONFIG));
+    if (Array.isArray(snapshot?.fields)) snapshot.fields.forEach(field => { if (field.id === 'category' || field.id === 'aiTool') delete field.options; });
+    if (snapshot?.defaults) { delete snapshot.defaults.category; delete snapshot.defaults.aiTool; }
+    localStorage.setItem('pb-builder-config-v1', JSON.stringify(snapshot));
     return true;
   } catch (error) {
     console.warn('[Prompt Builder] Could not persist Builder configuration locally:', error);
@@ -84,21 +120,7 @@ function persistConfigToDisk() {
 }
 
 function syncTemplateTaxonomyToBuilder(key, value) {
-  const fieldId = key === 'agent' ? 'aiTool' : 'category';
-  const field = Array.isArray(CONFIG?.fields) ? CONFIG.fields.find(item => item.id === fieldId) : null;
-  if (!field || !value) return false;
-  const exists = Array.isArray(field.options) && field.options.some(option => String(option.value) === value);
-  if (!exists) {
-    field.options = Array.isArray(field.options) ? field.options : [];
-    field.options.push({value, label: value});
-  }
-  const builderSelect = $(`field-${fieldId}`);
-  if (builderSelect && !Array.from(builderSelect.options).some(option => option.value === value)) {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = value;
-    builderSelect.appendChild(option);
-  }
+  refreshBuilderTaxonomy();
   if (key === 'category') {
     fillTemplateFilter('templateCategory', 'category', $('templateCategory')?.value || 'All');
     updateCategoryVisibility();
@@ -249,7 +271,10 @@ function saveTemplateFile() {
   syncTemplateTaxonomyToBuilder('agent', PROMPT_TEMPLATES[selectedTemplateIndex]?.agent || '');
   alignTemplateFiltersToCurrentTemplate();
   localStorage.setItem('pb-prompt-templates-v1', JSON.stringify({version:'0.1.54', project:'Prompt Builder', templates:PROMPT_TEMPLATES}));
-  localStorage.setItem('pb-builder-config-v1', JSON.stringify(CONFIG));
+  const configSnapshot = JSON.parse(JSON.stringify(CONFIG));
+  if (Array.isArray(configSnapshot?.fields)) configSnapshot.fields.forEach(field => { if (field.id === 'category' || field.id === 'aiTool') delete field.options; });
+  if (configSnapshot?.defaults) { delete configSnapshot.defaults.category; delete configSnapshot.defaults.aiTool; }
+  localStorage.setItem('pb-builder-config-v1', JSON.stringify(configSnapshot));
   $('editorSaveStatus').textContent = 'Templates saved';
   $('editorSaveStatus').style.color = '#047857';
   setTimeout(() => { if ($('editorSaveStatus')) $('editorSaveStatus').textContent = ''; }, 1600);
@@ -326,6 +351,7 @@ async function loadTemplates() {
       : [];
     fillTemplateFilter('templateCategory', 'category');
     fillTemplateFilter('templateAgent', 'agent');
+    refreshBuilderTaxonomy();
     updateCategoryVisibility();
     ['templateCategory', 'templateAgent'].forEach(id => {
       const el = $(id);
@@ -392,6 +418,7 @@ async function loadConfig() {
   }
   if (!loaded || !Array.isArray(loaded.fields)) throw new Error('Invalid Builder configuration: fields must be an array.');
   CONFIG = loaded;
+  refreshBuilderTaxonomy();
   mergeCustomDimensions();
   renderFields();
   setDefaults();
@@ -1511,11 +1538,18 @@ function restoreBuilderState() {
 }
 function bindBuilderStatePersistence(){ ['referenceDescription','finalPrompt','presetName'].forEach(id=>$(id)?.addEventListener('input',saveBuilderState)); window.addEventListener('beforeunload',saveBuilderState); }
 loadPresets();
-loadTemplates();
 bindBuilderStatePersistence();
 
-loadConfig().then(()=>{ restoreBuilderState(); updateOpenToolButton(); }).catch(error => {
-  console.error('[Prompt Builder] Startup failed:', error);
-  const root = $('dynamicFields');
-  if (root) root.innerHTML = `<div class=\"muted\">Could not load Builder configuration: ${escapeHtml(error.message)}</div>`;
-});
+(async()=>{
+  try {
+    await loadTemplates();
+    await loadConfig();
+    refreshBuilderTaxonomy();
+    restoreBuilderState();
+    updateOpenToolButton();
+  } catch (error) {
+    console.error('[Prompt Builder] Startup failed:', error);
+    const root = $('dynamicFields');
+    if (root) root.innerHTML = `<div class="muted">Could not load Builder configuration: ${escapeHtml(error.message)}</div>`;
+  }
+})();

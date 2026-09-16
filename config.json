@@ -1,5 +1,5 @@
 {
-  "version": "0.1.54",
+  "version": "0.1.55",
   "project": "Prompt Builder",
   "source": "Prompt Library Inventory + sketch.png",
   "fields": [
@@ -7,37 +7,13 @@
       "id": "category",
       "label": "Category",
       "type": "select",
-      "required": true,
-      "options": [
-        {
-          "value": "Sportsbook",
-          "label": "Sportsbook"
-        },
-        {
-          "value": "Casino",
-          "label": "Casino"
-        }
-      ]
+      "required": true
     },
     {
       "id": "aiTool",
       "label": "AI Tool",
       "type": "select",
-      "required": true,
-      "options": [
-        {
-          "value": "Magnific",
-          "label": "Magnific"
-        },
-        {
-          "value": "Figma AI",
-          "label": "Figma AI"
-        },
-        {
-          "value": "ChatGPT / Codex",
-          "label": "ChatGPT / Codex"
-        }
-      ]
+      "required": true
     },
     {
       "id": "style",
@@ -173,8 +149,6 @@
     }
   ],
   "defaults": {
-    "category": "Sportsbook",
-    "aiTool": "Magnific",
     "style": "Premium / Cinematic",
     "theme": "Champions League",
     "composition": "Athlete right / Text left",
@@ -248,5 +222,5 @@
     "Figma AI": "https://www.figma.com/ai/",
     "ChatGPT / Codex": "https://chatgpt.com/"
   },
-  "app_version": "0.1.46"
+  "app_version": "0.1.55"
 }
