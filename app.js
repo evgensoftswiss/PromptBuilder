@@ -163,7 +163,7 @@ function renderTemplateEditorList() {
   if (!list) return;
   const visible = filteredTemplateIndexes();
   $('templatesCount').textContent = `${visible.length} template${visible.length === 1 ? '' : 's'}`;
-  list.innerHTML = visible.length ? visible.map(({item,i}) => `<button type="button" class="template-editor-item ${i === selectedTemplateIndex ? 'active' : ''}" data-template-index="${i}"><strong>${escapeHtml(templateDisplayName(item,i))}</strong><span>${escapeHtml(item.agent || '')}</span><small>${escapeHtml(templateSection(item))} · ${escapeHtml(templateCategory(item))}</small></button>`).join('') : '<div class="template-empty">No templates match.</div>';
+  list.innerHTML = visible.length ? visible.map(({item,i}) => `<button type="button" class="template-editor-item ${i === selectedTemplateIndex ? 'active' : ''}" data-template-index="${i}"><strong>${escapeHtml(templateDisplayName(item,i))}</strong><small>${escapeHtml(templateSection(item))} · ${escapeHtml(templateCategory(item))} · ${escapeHtml(item.agent || '')}</small></button>`).join('') : '<div class="template-empty">No templates match.</div>';
   list.querySelectorAll('.template-editor-item').forEach(btn => btn.addEventListener('click', () => selectTemplate(Number(btn.dataset.templateIndex))));
 }
 function highlightPromptText(text) {
@@ -211,7 +211,11 @@ function configureVariableMap() {
   return map;
 }
 function templateSignature(item) { return JSON.stringify({section:String(item?.section||'').trim(),category:String(item?.category||'').trim(),agent:String(item?.agent||'').trim(),prompt_template:String(item?.prompt_template||'').trim()}); }
-function isBaselineTemplate(item) { return !!item && (item._source === 'builtin' || BASELINE_TEMPLATE_IDS.has(Number(item.id)) || BASELINE_TEMPLATE_SIGNATURES.has(templateSignature(item))); }
+function isBaselineTemplate(item) {
+  if (!item) return false;
+  if (item._source === 'user') return false;
+  return item._source === 'builtin' || BASELINE_TEMPLATE_IDS.has(Number(item.id)) || BASELINE_TEMPLATE_SIGNATURES.has(templateSignature(item));
+}
 function setTemplateEditorDisabled(readOnly) {
   const ids = ['editorTemplateName','editorTemplateSection','editorTemplateCategory','editorTemplateAgent','editorTemplateRating','editorPromptTemplate','editorContext','editorEvaluation'];
   ids.forEach(id => {
@@ -288,6 +292,7 @@ function writeTemplateEditorToModel() {
   item.prompt_template = $('editorPromptTemplate').value;
   item.context = $('editorContext').value;
   item.evaluation = $('editorEvaluation').value;
+  item.updatedAt = new Date().toISOString();
 }
 
 function alignTemplateFiltersToCurrentTemplate() {
@@ -352,12 +357,13 @@ async function addTemplate() {
   const selectedAgent = filterState.agent !== 'All' ? filterState.agent : '';
   const newTemplate = {
     id: nextUserTemplateId(),
+    _source: 'user',
     name: nextTemplateName(selectedSection, selectedAgent),
     section: selectedSection,
     category: selectedCategory,
     agent: selectedAgent,
     prompt_template: 'Create a new production-ready image prompt.\n\nUse the supplied reference description and Configure requirements.',
-    context: '', effectiveness_rating: 'Average', evaluation: ''
+    context: '', effectiveness_rating: 'Average', evaluation: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
   };
   PROMPT_TEMPLATES.push(newTemplate);
   selectedTemplateIndex = PROMPT_TEMPLATES.length - 1;
@@ -370,7 +376,7 @@ async function addTemplate() {
   populateTemplateEditor(selectedTemplateIndex);
 }
 
-async function duplicateTemplate() { if (selectedTemplateIndex < 0) return; const source = PROMPT_TEMPLATES[selectedTemplateIndex]; const copy = JSON.parse(JSON.stringify(source)); copy.id = nextUserTemplateId(); copy.name = `${templateDisplayName(source, selectedTemplateIndex)} Copy`; PROMPT_TEMPLATES.splice(selectedTemplateIndex + 1, 0, copy); selectedTemplateIndex += 1; await persistUserTemplates(); renderTemplateEditorList(); populateTemplateEditor(selectedTemplateIndex); alignTemplateFiltersToCurrentTemplate(); }
+async function duplicateTemplate() { if (selectedTemplateIndex < 0) return; const source = PROMPT_TEMPLATES[selectedTemplateIndex]; const copy = JSON.parse(JSON.stringify(source)); copy.id = nextUserTemplateId(); copy._source = 'user'; copy.name = `${templateDisplayName(source, selectedTemplateIndex)} Copy`; copy.createdAt = new Date().toISOString(); copy.updatedAt = copy.createdAt; PROMPT_TEMPLATES.splice(selectedTemplateIndex + 1, 0, copy); selectedTemplateIndex += 1; await persistUserTemplates(); renderTemplateEditorList(); populateTemplateEditor(selectedTemplateIndex); alignTemplateFiltersToCurrentTemplate(); }
 async function deleteTemplate() {
   if (selectedTemplateIndex < 0) return;
   if (isBaselineTemplate(PROMPT_TEMPLATES[selectedTemplateIndex])) { updateTemplateDeleteState(); return; }
@@ -471,15 +477,15 @@ async function loadTemplates() {
 }
 
 async function persistUserTemplates() {
-  const users = PROMPT_TEMPLATES.filter(item => item?._source === 'user');
+  const users = PROMPT_TEMPLATES.filter(item => item?._source === 'user').map(item => { const copy = {...item}; delete copy._source; return copy; });
   if (window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local') {
     try {
-      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.65', project:'Prompt Builder', templates:users}) });
+      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.66', project:'Prompt Builder', templates:users}) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return true;
     } catch (error) { console.warn('[Prompt Builder] Could not save local user templates:', error); return false; }
   }
-  try { localStorage.setItem('pb-user-templates-v4', JSON.stringify({version:'0.1.65', project:'Prompt Builder', templates:users})); return true; }
+  try { localStorage.setItem('pb-user-templates-v4', JSON.stringify({version:'0.1.66', project:'Prompt Builder', templates:users})); return true; }
   catch(error){ console.warn('[Prompt Builder] Could not save user templates:', error); return false; }
 }
 
@@ -1643,24 +1649,61 @@ $('model').addEventListener('change', () => {
   updateMockModeState();
 });
 
-const BUILDER_STATE_KEY = 'pb-builder-state-v1';
+const BUILDER_STATE_KEY = 'pb-builder-state-v2';
+const BUILDER_STATE_LEGACY_KEY = 'pb-builder-state-v1';
 let __restoringBuilderState = false;
 function saveBuilderState() {
-  if (__restoringBuilderState || !CONFIG?.fields || !hasAllConfigureFields()) return;
-  try { localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify({ values:getConfigValues(), referenceDescription:$('referenceDescription')?.value||'', finalPrompt:$('finalPrompt')?.value||'', presetName:$('presetName')?.value||'' })); }
+  if (__restoringBuilderState || !CONFIG?.fields || !hasAllConfigureFields()) return false;
+  try {
+    const payload = { version:'0.1.66', savedAt:new Date().toISOString(), values:getConfigValues(), referenceDescription:$('referenceDescription')?.value||'', finalPrompt:$('finalPrompt')?.value||'', presetName:$('presetName')?.value||'' };
+    localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify(payload));
+    return true;
+  }
   catch (error) { console.warn('[Prompt Builder] Could not save Builder state.', error); }
 }
 function restoreBuilderState() {
-  try { const raw=localStorage.getItem(BUILDER_STATE_KEY); if(!raw) return; const state=JSON.parse(raw); __restoringBuilderState=true; if(state.values) applyPresetValues(state.values); if($('referenceDescription')) $('referenceDescription').value=state.referenceDescription||''; if($('finalPrompt')) $('finalPrompt').value=state.finalPrompt||''; if($('presetName')) $('presetName').value=state.presetName||''; }
-  catch(error){ console.warn('[Prompt Builder] Could not restore Builder state.',error); }
-  finally { __restoringBuilderState=false; }
+  try {
+    const raw = localStorage.getItem(BUILDER_STATE_KEY) || localStorage.getItem(BUILDER_STATE_LEGACY_KEY);
+    if (!raw) return false;
+    const state = JSON.parse(raw);
+    if (!state || typeof state !== 'object' || !state.values) return false;
+    __restoringBuilderState = true;
+    ensureConfigureFields();
+    for (const field of (CONFIG?.fields || [])) {
+      if (field.type === 'palette') {
+        setReferencePalette(Array.isArray(state.values[field.id]) ? state.values[field.id] : []);
+      } else {
+        const el = $(`field-${field.id}`);
+        const value = state.values[field.id];
+        if (el && value != null) {
+          const text = String(value);
+          const hasOption = [...el.options].some(o => o.value === text);
+          if (hasOption) el.value = text;
+        }
+      }
+    }
+    if ($('referenceDescription')) $('referenceDescription').value = state.referenceDescription || '';
+    if ($('finalPrompt')) $('finalPrompt').value = state.finalPrompt || '';
+    if ($('presetName')) $('presetName').value = state.presetName || '';
+    updateOpenToolButton();
+    deriveRecommendation(state.values);
+    saveBuilderState();
+    return true;
+  } catch(error){
+    console.warn('[Prompt Builder] Could not restore Builder state.',error);
+    return false;
+  } finally {
+    __restoringBuilderState=false;
+  }
 }
+
 function clearPromptBuilderLocalStorage() {
   if (document.body?.dataset?.pbMode !== 'github') return;
   const ok = window.confirm('Clear Prompt Builder localStorage? This removes saved Builder state, presets, user templates, provider credentials, and AI settings stored in this browser. Base JSON files will not be changed.');
   if (!ok) return;
   const keys = [
     BUILDER_STATE_KEY,
+    BUILDER_STATE_LEGACY_KEY,
     'pb-presets-v1',
     'pb-user-templates-v4',
     'pb-user-templates-v3',
@@ -1675,7 +1718,16 @@ function clearPromptBuilderLocalStorage() {
   window.location.reload();
 }
 
-function bindBuilderStatePersistence(){ ['referenceDescription','finalPrompt','presetName'].forEach(id=>$(id)?.addEventListener('input',saveBuilderState)); window.addEventListener('beforeunload',saveBuilderState); }
+function bindBuilderStatePersistence(){
+  ['referenceDescription','finalPrompt','presetName'].forEach(id=>$(id)?.addEventListener('input',saveBuilderState));
+  const root = $('dynamicFields');
+  if (root) {
+    root.addEventListener('input', saveBuilderState, true);
+    root.addEventListener('change', saveBuilderState, true);
+  }
+  window.addEventListener('beforeunload',saveBuilderState);
+  window.addEventListener('pagehide',saveBuilderState);
+}
 loadPresets();
 bindBuilderStatePersistence();
 $('clearLocalStorageBtn')?.addEventListener('click', clearPromptBuilderLocalStorage);
@@ -1686,7 +1738,7 @@ $('clearLocalStorageBtn')?.addEventListener('click', clearPromptBuilderLocalStor
     await loadConfig();
     refreshBuilderTaxonomy();
     restoreBuilderState();
-    updateOpenToolButton();
+    requestAnimationFrame(() => { restoreBuilderState(); updateOpenToolButton(); });
   } catch (error) {
     console.error('[Prompt Builder] Startup failed:', error);
     const root = $('dynamicFields');
