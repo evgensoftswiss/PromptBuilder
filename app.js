@@ -444,12 +444,12 @@ async function persistUserTemplates() {
   const users = PROMPT_TEMPLATES.filter(item => !isBaselineTemplate(item));
   if (window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local') {
     try {
-      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.61', project:'Prompt Builder', templates:users}) });
+      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.62', project:'Prompt Builder', templates:users}) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return true;
     } catch (error) { console.warn('[Prompt Builder] Could not save local user templates:', error); return false; }
   }
-  try { localStorage.setItem('pb-user-templates-v4', JSON.stringify({version:'0.1.61', project:'Prompt Builder', templates:users})); return true; }
+  try { localStorage.setItem('pb-user-templates-v4', JSON.stringify({version:'0.1.62', project:'Prompt Builder', templates:users})); return true; }
   catch(error){ console.warn('[Prompt Builder] Could not save user templates:', error); return false; }
 }
 
@@ -1617,9 +1617,30 @@ function restoreBuilderState() {
   catch(error){ console.warn('[Prompt Builder] Could not restore Builder state.',error); }
   finally { __restoringBuilderState=false; }
 }
+function clearPromptBuilderLocalStorage() {
+  if (document.body?.dataset?.pbMode !== 'github') return;
+  const ok = window.confirm('Clear Prompt Builder localStorage? This removes saved Builder state, presets, user templates, provider credentials, and AI settings stored in this browser. Base JSON files will not be changed.');
+  if (!ok) return;
+  const keys = [
+    BUILDER_STATE_KEY,
+    'pb-presets-v1',
+    'pb-user-templates-v4',
+    'pb-user-templates-v3',
+    'pb-prompt-templates-v2',
+    'pb-prompt-templates-v1',
+    'pb-builder-config-v1',
+    'pb-custom-dimensions-v1',
+    'pb-ai-settings',
+    'pb-provider-credentials-v1'
+  ];
+  keys.forEach(key => localStorage.removeItem(key));
+  window.location.reload();
+}
+
 function bindBuilderStatePersistence(){ ['referenceDescription','finalPrompt','presetName'].forEach(id=>$(id)?.addEventListener('input',saveBuilderState)); window.addEventListener('beforeunload',saveBuilderState); }
 loadPresets();
 bindBuilderStatePersistence();
+$('clearLocalStorageBtn')?.addEventListener('click', clearPromptBuilderLocalStorage);
 
 (async()=>{
   try {
