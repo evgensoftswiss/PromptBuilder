@@ -523,16 +523,16 @@ async function loadTemplates() {
 }
 
 async function persistUserTemplates() {
-  const users = PROMPT_TEMPLATES.filter(item => item?._source === 'user').map(item => { const copy = {...item}; delete copy._source; return copy; });
+  const users = PROMPT_TEMPLATES.filter(item => item?._source === 'user').map(orderedUserTemplate);
   if (window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local') {
     try {
-      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.71', project:'Prompt Builder', templates:users}) });
+      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.73', project:'Prompt Builder', templates:users}) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return true;
     } catch (error) { console.warn('[Prompt Builder] Could not save local user templates:', error); return false; }
   }
   try {
-    const payload = {version:'0.1.71', project:'Prompt Builder', templates:users};
+    const payload = {version:'0.1.73', project:'Prompt Builder', templates:users};
     localStorage.setItem(USER_TEMPLATES_STORAGE_KEY, JSON.stringify(payload));
     // Verify the write so GitHub Pages failures are visible immediately.
     const verify = localStorage.getItem(USER_TEMPLATES_STORAGE_KEY);
@@ -1057,26 +1057,82 @@ function validateUserTemplate(item, index = -1) {
   if (duplicateName) errors.push(`Template name "${name}" already exists.`);
   return errors;
 }
+function orderedUserTemplate(item) {
+  return {
+    id: Number(item?.id) || 0,
+    name: String(item?.name || ''),
+    section: String(item?.section || ''),
+    category: String(item?.category || ''),
+    agent: String(item?.agent || ''),
+    prompt_template: String(item?.prompt_template || ''),
+    context: String(item?.context || ''),
+    effectiveness_rating: String(item?.effectiveness_rating || ''),
+    evaluation: String(item?.evaluation || ''),
+    createdAt: item?.createdAt || null,
+    updatedAt: item?.updatedAt || null
+  };
+}
+function orderedPreset(item) {
+  return {
+    name: String(item?.name || ''),
+    values: item?.values && typeof item.values === 'object' ? item.values : {},
+    referenceDescription: String(item?.referenceDescription || ''),
+    createdAt: item?.createdAt || null,
+    updatedAt: item?.updatedAt || null
+  };
+}
 function exportUserData() {
-  const users = PROMPT_TEMPLATES.filter(item => item?._source === 'user').map(item => ({...item, _source: undefined})).map(item => { delete item._source; return item; });
+  console.info('[Prompt Builder] Export includes user presets:', Array.isArray(SAVED_PRESETS) ? SAVED_PRESETS.length : 0);
+  const users = PROMPT_TEMPLATES
+    .filter(item => item?._source === 'user')
+    .map(orderedUserTemplate);
   const settings = JSON.parse(localStorage.getItem('pb-ai-settings') || '{}');
   const builderRaw = localStorage.getItem(BUILDER_STATE_KEY) || '';
+  const builderState = builderRaw ? JSON.parse(builderRaw) : null;
+  const stateValues = builderState?.values && typeof builderState.values === 'object' ? builderState.values : {};
+  const orderedBuilderValues = {
+    category: String(stateValues.category || ''),
+    section: String(stateValues.section || ''),
+    aiTool: String(stateValues.aiTool || ''),
+    style: String(stateValues.style || ''),
+    theme: String(stateValues.theme || ''),
+    composition: String(stateValues.composition || ''),
+    palette: Array.isArray(stateValues.palette) ? stateValues.palette.slice(0, 10) : [],
+    dimensions: String(stateValues.dimensions || '')
+  };
   const data = {
     format: 'prompt-builder-user-data',
-    version: '0.1.71',
+    version: '0.1.73',
     exportedAt: new Date().toISOString(),
     userTemplates: users,
-    presets: SAVED_PRESETS,
+    presets: (Array.isArray(SAVED_PRESETS) ? SAVED_PRESETS : []).map(orderedPreset),
     customDimensions: getCustomDimensions(),
-    builderState: builderRaw ? JSON.parse(builderRaw) : null,
-    aiSettings: { provider: settings.provider || '', baseUrl: settings.baseUrl || '', model: settings.model || '', models: settings.models || {} }
+    builderState: builderState ? {
+      version: '0.1.73',
+      savedAt: builderState.savedAt || null,
+      values: orderedBuilderValues,
+      referenceDescription: String(builderState.referenceDescription || ''),
+      finalPrompt: String(builderState.finalPrompt || ''),
+      presetName: String(builderState.presetName || '')
+    } : null,
+    aiSettings: {
+      provider: settings.provider || '',
+      baseUrl: settings.baseUrl || '',
+      model: settings.model || '',
+      models: settings.models && typeof settings.models === 'object' ? settings.models : {}
+    }
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href=url; a.download='prompt-builder-user-data.json'; a.click();
+  const a = document.createElement('a');
+  a.href = url;
+  a.download='prompt-builder-user-data.json';
+  a.click();
   URL.revokeObjectURL(url);
 }
+
 async function importUserData(file) {
+  console.info('[Prompt Builder] Importing user presets when present in export.');
   const text = await file.text();
   const data = JSON.parse(text);
   if (!data || data.format !== 'prompt-builder-user-data') throw new Error('Invalid Prompt Builder user data file.');
@@ -1098,7 +1154,9 @@ async function importUserData(file) {
     const key = `${item.id}|${item.name}|${item.prompt_template}`;
     if (seen.has(key)) return false; seen.add(key); return true;
   });
-  SAVED_PRESETS = Array.isArray(data.presets) ? data.presets.slice(-20) : SAVED_PRESETS;
+  if (Array.isArray(data.presets)) {
+    SAVED_PRESETS = data.presets.slice(-20).map(orderedPreset);
+  }
   savePresetsToStorage();
   if (Array.isArray(data.customDimensions)) saveCustomDimensions(data.customDimensions);
   if (data.builderState) localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify(data.builderState));
@@ -1829,7 +1887,7 @@ let __restoringBuilderState = false;
 function saveBuilderState() {
   if (__restoringBuilderState || !CONFIG?.fields || !hasAllConfigureFields()) return false;
   try {
-    const payload = { version:'0.1.71', savedAt:new Date().toISOString(), values:getConfigValues(), referenceDescription:$('referenceDescription')?.value||'', finalPrompt:$('finalPrompt')?.value||'', presetName:$('presetName')?.value||'' };
+    const payload = { version:'0.1.73', savedAt:new Date().toISOString(), values:getConfigValues(), referenceDescription:$('referenceDescription')?.value||'', finalPrompt:$('finalPrompt')?.value||'', presetName:$('presetName')?.value||'' };
     localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify(payload));
     return true;
   }
