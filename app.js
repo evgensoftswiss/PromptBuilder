@@ -11,6 +11,8 @@ let SAVED_CREDENTIALS = {};
 let SAVED_PRESETS = [];
 let PROMPT_TEMPLATES = [];
 let selectedTemplateIndex = -1;
+let BASELINE_TEMPLATE_MAX_ID = 0;
+let BASELINE_TEMPLATE_IDS = new Set();
 
 const TEMPLATE_RATING = { Excellent: 5, Good: 4, Average: 3, 'Needs Improvement': 2 };
 function templateStars(value) {
@@ -205,11 +207,16 @@ function configureVariableMap() {
   map.references = ref;
   return map;
 }
+function isBaselineTemplate(item) { return !!item && BASELINE_TEMPLATE_IDS.has(Number(item.id)); }
+function setTemplateEditorDisabled(disabled) {
+  ['editorTemplateName','editorTemplateSection','editorTemplateCategory','editorTemplateAgent','editorTemplateRating','editorPromptTemplate','editorContext','editorEvaluation'].forEach(id => { const el=$(id); if (el) el.disabled=disabled; });
+  const save=$('templateSaveBtn'); if (save) save.disabled=disabled;
+}
 function updateTemplateDeleteState() {
   const btn = $('templateDeleteBtn');
   if (!btn) return;
   const item = PROMPT_TEMPLATES[selectedTemplateIndex];
-  const canDelete = !!item?.CanBeDeleted;
+  const canDelete = !!item && !isBaselineTemplate(item);
   btn.disabled = !canDelete;
   btn.title = canDelete ? 'Delete this template' : 'This template cannot be deleted';
 }
@@ -238,12 +245,14 @@ function populateTemplateEditor(index) {
   $('editorContext').value = item.context || '';
   $('editorEvaluation').value = item.evaluation || '';
   syncPromptHighlight();
+  setTemplateEditorDisabled(isBaselineTemplate(item));
   updateTemplateDeleteState();
   renderTemplateEditorList();
 }
 function writeTemplateEditorToModel() {
   if (selectedTemplateIndex < 0 || !PROMPT_TEMPLATES[selectedTemplateIndex]) return;
   const item = PROMPT_TEMPLATES[selectedTemplateIndex];
+  if (isBaselineTemplate(item)) return;
   item.name = $('editorTemplateName').value.trim();
   item.section = $('editorTemplateSection').value.trim();
   item.category = $('editorTemplateCategory').value.trim();
@@ -272,13 +281,14 @@ function alignTemplateFiltersToCurrentTemplate() {
   });
   if (changed) { updateCategoryVisibility(); renderTemplateEditorList(); }
 }
-function saveTemplateFile() {
+async function saveTemplateFile() {
+  if (selectedTemplateIndex < 0 || isBaselineTemplate(PROMPT_TEMPLATES[selectedTemplateIndex])) { updateTemplateDeleteState(); return; }
   writeTemplateEditorToModel();
   syncTemplateTaxonomyToBuilder('section', templateSection(PROMPT_TEMPLATES[selectedTemplateIndex] || {}));
   syncTemplateTaxonomyToBuilder('category', templateCategory(PROMPT_TEMPLATES[selectedTemplateIndex] || {}));
   syncTemplateTaxonomyToBuilder('agent', PROMPT_TEMPLATES[selectedTemplateIndex]?.agent || '');
   alignTemplateFiltersToCurrentTemplate();
-  localStorage.setItem('pb-prompt-templates-v2', JSON.stringify({version:'0.1.58', project:'Prompt Builder', templates:PROMPT_TEMPLATES}));
+  await persistUserTemplates();
   const configSnapshot = JSON.parse(JSON.stringify(CONFIG));
   if (Array.isArray(configSnapshot?.fields)) configSnapshot.fields.forEach(field => { if (field.id === 'section' || field.id === 'category' || field.id === 'aiTool') delete field.options; });
   if (configSnapshot?.defaults) { delete configSnapshot.defaults.category; delete configSnapshot.defaults.aiTool; }
@@ -289,8 +299,8 @@ function saveTemplateFile() {
   renderTemplateEditorList(); populateTemplateEditor(selectedTemplateIndex);
 }
 function selectTemplate(index) { selectedTemplateIndex = index; populateTemplateEditor(index); }
-function nextTemplateName(category, agent) {
-  const parts = [category, agent].filter(value => value && value !== 'All').map(value => String(value).trim()).filter(Boolean);
+function nextTemplateName(section, agent) {
+  const parts = [section, agent].filter(value => value && value !== 'All').map(value => String(value).trim()).filter(Boolean);
   const prefix = parts.join('-') || 'Template';
   const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`^${escapedPrefix}-(\\d+)$`);
@@ -301,7 +311,10 @@ function nextTemplateName(category, agent) {
   });
   return `${prefix}-${maxNumber + 1}`;
 }
-function addTemplate() {
+function nextUserTemplateId() {
+  return Math.max(BASELINE_TEMPLATE_MAX_ID, ...PROMPT_TEMPLATES.map(item => Number(item.id) || 0)) + 1;
+}
+async function addTemplate() {
   const filterState = {
     section: $('templateSection')?.value || 'All',
     category: $('templateCategory')?.value || 'All',
@@ -311,30 +324,34 @@ function addTemplate() {
   const selectedCategory = filterState.category !== 'All' ? filterState.category : '';
   const selectedAgent = filterState.agent !== 'All' ? filterState.agent : '';
   const newTemplate = {
+    id: nextUserTemplateId(),
     name: nextTemplateName(selectedSection, selectedAgent),
     section: selectedSection,
     category: selectedCategory,
     agent: selectedAgent,
     prompt_template: 'Create a new production-ready image prompt.\n\nUse the supplied reference description and Configure requirements.',
-    context: '', effectiveness_rating: 'Average', evaluation: '', CanBeDeleted: true
+    context: '', effectiveness_rating: 'Average', evaluation: ''
   };
   PROMPT_TEMPLATES.push(newTemplate);
   selectedTemplateIndex = PROMPT_TEMPLATES.length - 1;
+  await persistUserTemplates();
   fillTemplateFilter('templateSection','section', filterState.section);
   fillTemplateFilter('templateCategory','category', filterState.category);
   fillTemplateFilter('templateAgent','agent', filterState.agent);
+  refreshBuilderTaxonomy();
   updateCategoryVisibility();
   populateTemplateEditor(selectedTemplateIndex);
 }
-function duplicateTemplate() { if (selectedTemplateIndex < 0) return; const source = PROMPT_TEMPLATES[selectedTemplateIndex]; const copy = JSON.parse(JSON.stringify(source)); copy.name = `${templateDisplayName(source, selectedTemplateIndex)} Copy`; copy.CanBeDeleted = true; PROMPT_TEMPLATES.splice(selectedTemplateIndex + 1, 0, copy); selectedTemplateIndex += 1; renderTemplateEditorList(); populateTemplateEditor(selectedTemplateIndex); alignTemplateFiltersToCurrentTemplate(); }
-function deleteTemplate() {
+
+async function duplicateTemplate() { if (selectedTemplateIndex < 0) return; const source = PROMPT_TEMPLATES[selectedTemplateIndex]; const copy = JSON.parse(JSON.stringify(source)); copy.id = nextUserTemplateId(); copy.name = `${templateDisplayName(source, selectedTemplateIndex)} Copy`; PROMPT_TEMPLATES.splice(selectedTemplateIndex + 1, 0, copy); selectedTemplateIndex += 1; await persistUserTemplates(); renderTemplateEditorList(); populateTemplateEditor(selectedTemplateIndex); alignTemplateFiltersToCurrentTemplate(); }
+async function deleteTemplate() {
   if (selectedTemplateIndex < 0) return;
-  if (!PROMPT_TEMPLATES[selectedTemplateIndex]?.CanBeDeleted) { updateTemplateDeleteState(); return; }
+  if (isBaselineTemplate(PROMPT_TEMPLATES[selectedTemplateIndex])) { updateTemplateDeleteState(); return; }
   if (!confirm('Delete this template?')) return;
   const deletedIndex = selectedTemplateIndex;
   PROMPT_TEMPLATES.splice(deletedIndex, 1);
   try {
-    localStorage.setItem('pb-prompt-templates-v2', JSON.stringify({version:'0.1.58', project:'Prompt Builder', templates:PROMPT_TEMPLATES}));
+    await persistUserTemplates();
   } catch (error) { console.warn('[Prompt Builder] Could not persist deleted template:', error); }
   const visible = filteredTemplateIndexes();
   if (visible.length) {
@@ -353,70 +370,52 @@ async function loadTemplates() {
   try {
     const normalize = (item) => {
       const next = { ...item };
+      const parsedId = Number(next.id);
+      next.id = Number.isFinite(parsedId) && parsedId > 0 ? parsedId : null;
       next.section = String(next.section || '').trim();
       next.category = String(next.category || '').trim();
       next.agent = String(next.agent || '').trim();
-      next.CanBeDeleted = next.CanBeDeleted === true;
       return next;
     };
     const response = await fetch('./prompt_templates.json', { cache: 'no-store' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const baseline = await response.json();
     const baselineTemplates = Array.isArray(baseline?.templates) ? baseline.templates.map(normalize) : [];
+    BASELINE_TEMPLATE_MAX_ID = baselineTemplates.reduce((m, item) => Math.max(m, Number(item.id) || 0), 0);
+    BASELINE_TEMPLATE_IDS = new Set(baselineTemplates.map(item => Number(item.id)).filter(Number.isFinite));
+    BASELINE_TEMPLATE_MAX_ID = baselineTemplates.reduce((m, item) => Math.max(m, Number(item.id) || 0), 0);
+    let usedIds = new Set(baselineTemplates.map(item => item.id).filter(Number.isFinite));
 
-    let stored = null;
+    let userTemplates = [];
     try {
-      const rawV2 = localStorage.getItem('pb-prompt-templates-v2');
-      if (rawV2) stored = JSON.parse(rawV2);
-      if (!stored) {
-        const rawV1 = localStorage.getItem('pb-prompt-templates-v1');
-        if (rawV1) stored = JSON.parse(rawV1);
+      let candidates = [];
+      if (window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local') {
+        const r = await fetch('./user_templates.json', { cache: 'no-store' });
+        if (r.ok) { const stored = await r.json(); candidates = Array.isArray(stored?.templates) ? stored.templates : []; }
+      } else {
+        const raw = localStorage.getItem('pb-user-templates-v4') || localStorage.getItem('pb-user-templates-v3') || localStorage.getItem('pb-prompt-templates-v2') || localStorage.getItem('pb-prompt-templates-v1');
+        if (raw) { const stored = JSON.parse(raw); candidates = Array.isArray(stored?.templates) ? stored.templates : (Array.isArray(stored) ? stored : []); }
       }
-    } catch (_) { stored = null; }
+      let nextId = Math.max(BASELINE_TEMPLATE_MAX_ID, ...candidates.map(x => Number(x?.id) || 0));
+      for (const rawItem of candidates) {
+        const item = normalize(rawItem);
+        const legacyUser = rawItem?.CanBeDeleted === true || !BASELINE_TEMPLATE_IDS.has(Number(item.id));
+        if (isBaselineTemplate(item) || !legacyUser) continue;
+        delete item.CanBeDeleted;
+        if (!Number.isFinite(item.id) || item.id <= BASELINE_TEMPLATE_MAX_ID || usedIds.has(item.id)) item.id = ++nextId;
+        usedIds.add(item.id);
+        userTemplates.push(item);
+      }
+    } catch (_) { userTemplates = []; }
 
-    if (Array.isArray(stored?.templates)) {
-      const localTemplates = stored.templates.map(normalize);
-      const repairFromBaseline = (item) => {
-        const match = baselineTemplates.find(baseItem =>
-          String(baseItem.prompt_template || '') === String(item.prompt_template || '')
-        );
-        if (!match) return item;
-        return {
-          ...item,
-          section: item.section || match.section,
-          category: item.category || match.category,
-          agent: item.agent || match.agent,
-          context: item.context || match.context,
-          effectiveness_rating: item.effectiveness_rating || match.effectiveness_rating,
-          evaluation: item.evaluation || match.evaluation
-        };
-      };
-      const repairedLocalTemplates = localTemplates.map(repairFromBaseline);
-      const userTemplates = repairedLocalTemplates.filter(item => item.CanBeDeleted === true);
-      const protectedLocal = repairedLocalTemplates.filter(item => item.CanBeDeleted !== true);
-      const merged = baselineTemplates.map(baseItem => {
-        const match = protectedLocal.find(localItem =>
-          String(localItem.prompt_template || '') === String(baseItem.prompt_template || '')
-        );
-        return match ? {
-          ...baseItem,
-          ...match,
-          CanBeDeleted: false,
-          section: match.section || baseItem.section,
-          category: match.category || baseItem.category,
-          agent: match.agent || baseItem.agent
-        } : baseItem;
-      });
-      const baselineSignatures = new Set(merged.map(item => JSON.stringify({section:item.section,category:item.category,agent:item.agent,prompt_template:item.prompt_template||'',context:item.context||''})));
-      for (const item of userTemplates) {
-        const sig = JSON.stringify({section:item.section,category:item.category,agent:item.agent,prompt_template:item.prompt_template||'',context:item.context||''});
-        if (!baselineSignatures.has(sig)) { merged.push(item); baselineSignatures.add(sig); }
-      }
-      PROMPT_TEMPLATES = merged;
-      localStorage.setItem('pb-prompt-templates-v2', JSON.stringify({version:'0.1.58', project:'Prompt Builder', templates:PROMPT_TEMPLATES}));
-    } else {
-      PROMPT_TEMPLATES = baselineTemplates;
-    }
+    const dedupe = new Set(baselineTemplates.map(item => JSON.stringify({section:item.section,category:item.category,agent:item.agent,prompt_template:item.prompt_template||''})));
+    userTemplates = userTemplates.filter(item => {
+      const sig=JSON.stringify({section:item.section,category:item.category,agent:item.agent,prompt_template:item.prompt_template||''});
+      if (dedupe.has(sig)) return false; dedupe.add(sig); return true;
+    });
+    PROMPT_TEMPLATES = [...baselineTemplates, ...userTemplates];
+    if (!(window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local')) persistUserTemplates();
+
     fillTemplateFilter('templateSection', 'section');
     fillTemplateFilter('templateCategory', 'category');
     fillTemplateFilter('templateAgent', 'agent');
@@ -439,6 +438,19 @@ async function loadTemplates() {
     console.error('[Prompt Builder] Could not load prompt templates:', error);
     if ($('templateEditorList')) $('templateEditorList').innerHTML = '<div class="template-empty">Could not load prompt templates.</div>';
   }
+}
+
+async function persistUserTemplates() {
+  const users = PROMPT_TEMPLATES.filter(item => !isBaselineTemplate(item));
+  if (window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local') {
+    try {
+      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.61', project:'Prompt Builder', templates:users}) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return true;
+    } catch (error) { console.warn('[Prompt Builder] Could not save local user templates:', error); return false; }
+  }
+  try { localStorage.setItem('pb-user-templates-v4', JSON.stringify({version:'0.1.61', project:'Prompt Builder', templates:users})); return true; }
+  catch(error){ console.warn('[Prompt Builder] Could not save user templates:', error); return false; }
 }
 
 function showAiOverlay(message) {

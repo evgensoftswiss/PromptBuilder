@@ -1,5 +1,5 @@
 {
-  "version": "0.1.57",
+  "version": "0.1.60",
   "project": "Prompt Builder",
   "source": "Prompt Library Inventory + sketch.png",
   "fields": [
@@ -186,5 +186,5 @@
     "templateSource": "promptTemplates",
     "instructions": "Use the selected AI Tool template as the required structure. Fill it using every meaningful Configure field and the Description of references. Configure has priority over reference guidance if they conflict."
   },
-  "app_version": "0.1.57"
+  "app_version": "0.1.60"
 }
