@@ -217,16 +217,27 @@ function setTemplateEditorDisabled(readOnly) {
   ids.forEach(id => {
     const el = $(id);
     if (!el) return;
-    el.readOnly = !!readOnly && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
+    const isText = el.tagName === 'INPUT' || el.tagName === 'TEXTAREA';
     el.classList.toggle('readonly-field', !!readOnly);
-    if (el.tagName === 'SELECT') {
-      el.dataset.readonly = readOnly ? '1' : '0';
-      el.setAttribute('aria-readonly', readOnly ? 'true' : 'false');
-      el.tabIndex = readOnly ? -1 : 0;
-      el.style.pointerEvents = readOnly ? 'none' : '';
+    el.dataset.readonly = readOnly ? '1' : '0';
+    el.setAttribute('aria-readonly', readOnly ? 'true' : 'false');
+    if (isText) {
+      el.readOnly = !!readOnly;
+      el.disabled = false;
+    } else if (el.tagName === 'SELECT') {
+      // Native <select> has no readonly mode. Keep it visually enabled and
+      // preserve its text value, but block changing/opening it while readonly.
+      el.disabled = false;
+      el.tabIndex = readOnly ? 0 : 0;
     }
   });
   const save=$('templateSaveBtn'); if (save) save.disabled=!!readOnly;
+  const prompt = $('editorPromptTemplate');
+  const highlight = $('editorPromptHighlight');
+  if (prompt && highlight) {
+    prompt.classList.toggle('readonly-prompt', !!readOnly);
+    highlight.style.display = readOnly ? 'none' : '';
+  }
 }
 function updateTemplateDeleteState() {
   const btn = $('templateDeleteBtn');
@@ -463,12 +474,12 @@ async function persistUserTemplates() {
   const users = PROMPT_TEMPLATES.filter(item => item?._source === 'user');
   if (window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local') {
     try {
-      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.64', project:'Prompt Builder', templates:users}) });
+      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.65', project:'Prompt Builder', templates:users}) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return true;
     } catch (error) { console.warn('[Prompt Builder] Could not save local user templates:', error); return false; }
   }
-  try { localStorage.setItem('pb-user-templates-v4', JSON.stringify({version:'0.1.64', project:'Prompt Builder', templates:users})); return true; }
+  try { localStorage.setItem('pb-user-templates-v4', JSON.stringify({version:'0.1.65', project:'Prompt Builder', templates:users})); return true; }
   catch(error){ console.warn('[Prompt Builder] Could not save user templates:', error); return false; }
 }
 
@@ -1609,6 +1620,14 @@ $('templateDeleteBtn')?.addEventListener('click', deleteTemplate);
 $('editorPromptTemplate')?.addEventListener('input', ()=>{writeTemplateEditorToModel();syncPromptHighlight();});
 $('editorPromptTemplate')?.addEventListener('scroll', syncPromptHighlight);
 ['editorTemplateName','editorTemplateSection','editorTemplateCategory','editorTemplateAgent','editorContext','editorEvaluation'].forEach(id=>$(id)?.addEventListener('input', ()=>{writeTemplateEditorToModel();}));
+['editorTemplateSection','editorTemplateCategory','editorTemplateAgent','editorTemplateRating'].forEach(id=>{
+  $(id)?.addEventListener('mousedown', (event)=>{ if ($(id).dataset.readonly === '1') event.preventDefault(); });
+  $(id)?.addEventListener('keydown', (event)=>{ if ($(id).dataset.readonly === '1') event.preventDefault(); });
+});
+$( 'editorPromptTemplate')?.addEventListener('keydown', (event)=>{ if ($('editorPromptTemplate').dataset.readonly === '1') event.preventDefault(); });
+$( 'editorPromptTemplate')?.addEventListener('beforeinput', (event)=>{ if ($('editorPromptTemplate').dataset.readonly === '1') event.preventDefault(); });
+$( 'editorPromptTemplate')?.addEventListener('paste', (event)=>{ if ($('editorPromptTemplate').dataset.readonly === '1') event.preventDefault(); });
+$( 'editorPromptTemplate')?.addEventListener('drop', (event)=>{ if ($('editorPromptTemplate').dataset.readonly === '1') event.preventDefault(); });
 $('editorTemplateRating')?.addEventListener('change', ()=>{writeTemplateEditorToModel();updateEditorRatingStars($('editorTemplateRating').value);});
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>showTab(t.dataset.tab));
 document.querySelector('.configure .section-head')?.addEventListener('click', () => {

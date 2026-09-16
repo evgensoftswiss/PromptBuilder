@@ -163,3 +163,10 @@
 
 /* Read-only template fields remain visually enabled and selectable. */
 .readonly-field { opacity: 1; color: inherit; background: inherit; cursor: default; }
+
+/* PB0.1.65: baseline template fields are read-only but remain visually normal/selectable. */
+.readonly-field{opacity:1!important;background:#fff!important;color:#111827!important;cursor:text!important;}
+.readonly-field:focus{border-color:#d8dde5!important;box-shadow:none!important;}
+.template-editor-grid select.readonly-field{pointer-events:auto;}
+.code-editor textarea.readonly-prompt{position:absolute;inset:0;z-index:2;background:#fff!important;color:#1f2937!important;-webkit-text-fill-color:#1f2937!important;caret-color:transparent!important;cursor:text!important;resize:none;}
+.code-editor textarea.readonly-prompt::selection{background:rgba(139,92,246,.22);}
