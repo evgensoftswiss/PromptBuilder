@@ -28,16 +28,22 @@ function templateTaxonomyValues(key) {
 
 function refreshBuilderTaxonomy() {
   if (!CONFIG?.fields || !Array.isArray(PROMPT_TEMPLATES)) return;
+  const sections = templateTaxonomyValues('section');
   const categories = templateTaxonomyValues('category');
   const agents = templateTaxonomyValues('agent');
+  const sectionField = CONFIG.fields.find(f => f.id === 'section');
   const categoryField = CONFIG.fields.find(f => f.id === 'category');
   const aiToolField = CONFIG.fields.find(f => f.id === 'aiTool');
+  if (sectionField) {
+    sectionField.options = sections.map(value => ({ value, label: value }));
+  }
   if (categoryField) {
     categoryField.options = categories.map(value => ({ value, label: value }));
   }
   if (aiToolField) {
     aiToolField.options = agents.map(value => ({ value, label: value }));
   }
+  const sectionSelect = $('field-section');
   const categorySelect = $('field-category');
   const aiToolSelect = $('field-aiTool');
   const setSelectOptions = (select, values) => {
@@ -47,6 +53,7 @@ function refreshBuilderTaxonomy() {
     if (current && values.includes(current)) select.value = current;
     else if (values.length) select.value = values[0];
   };
+  setSelectOptions(sectionSelect, sections);
   setSelectOptions(categorySelect, categories);
   setSelectOptions(aiToolSelect, agents);
   if (categorySelect) categorySelect.dispatchEvent(new Event('change', { bubbles: true }));
@@ -56,7 +63,7 @@ function refreshBuilderTaxonomy() {
 function fillTemplateFilter(id, key, preserve = '') {
   const select = $(id);
   if (!select) return;
-  const allLabels = { category: 'All categories', agent: 'All AI tools' };
+  const allLabels = { section: 'All sections', category: 'All categories', agent: 'All AI tools' };
   const values = templateValues(key);
   select.innerHTML = values.map(value => `<option value="${escapeAttr(value)}">${escapeHtml(value === 'All' ? allLabels[key] : value)}</option>`).join('');
   select.value = values.includes(preserve) ? preserve : 'All';
@@ -69,20 +76,19 @@ function updateCategoryVisibility() {
   }
   return true;
 }
-function templateCategory(item) {
-  return String(item.category || item.section || '').trim();
-}
+function templateSection(item) { return String(item.section || '').trim(); }
+function templateCategory(item) { return String(item.category || '').trim(); }
 function filteredTemplateIndexes() {
-  const filters = { category: $('templateCategory')?.value || 'All', agent: $('templateAgent')?.value || 'All' };
+  const filters = { section: $('templateSection')?.value || 'All', category: $('templateCategory')?.value || 'All', agent: $('templateAgent')?.value || 'All' };
   return PROMPT_TEMPLATES.map((item, i) => ({item, i})).filter(({item}) =>
-    Object.entries(filters).every(([key,value]) => value === 'All' || (key === 'category' ? templateCategory(item) : item[key]) === value)
+    Object.entries(filters).every(([key,value]) => value === 'All' || (key === 'section' ? templateSection(item) : key === 'category' ? templateCategory(item) : item[key]) === value)
   );
 }
 function templateDisplayName(item, index) {
   return item.name || `${templateCategory(item) || 'Template'} ${index + 1}`;
 }
 function uniqueTemplateValues(key) {
-  return [...new Set(PROMPT_TEMPLATES.map(item => String(key === 'category' ? templateCategory(item) : (item[key] || '')).trim()).filter(Boolean))];
+  return [...new Set(PROMPT_TEMPLATES.map(item => String(key === 'section' ? templateSection(item) : key === 'category' ? templateCategory(item) : (item[key] || '')).trim()).filter(Boolean))];
 }
 function templateChoiceOptions(key, current = '') {
   const values = uniqueTemplateValues(key);
@@ -109,8 +115,8 @@ function fillTemplateMetaSelect(id, key, current = '') {
 function persistConfigToDisk() {
   try {
     const snapshot = JSON.parse(JSON.stringify(CONFIG));
-    if (Array.isArray(snapshot?.fields)) snapshot.fields.forEach(field => { if (field.id === 'category' || field.id === 'aiTool') delete field.options; });
-    if (snapshot?.defaults) { delete snapshot.defaults.category; delete snapshot.defaults.aiTool; }
+    if (Array.isArray(snapshot?.fields)) snapshot.fields.forEach(field => { if (field.id === 'section' || field.id === 'category' || field.id === 'aiTool') delete field.options; });
+    if (snapshot?.defaults) { delete snapshot.defaults.section; delete snapshot.defaults.category; delete snapshot.defaults.aiTool; }
     localStorage.setItem('pb-builder-config-v1', JSON.stringify(snapshot));
     return true;
   } catch (error) {
@@ -121,10 +127,8 @@ function persistConfigToDisk() {
 
 function syncTemplateTaxonomyToBuilder(key, value) {
   refreshBuilderTaxonomy();
-  if (key === 'category') {
-    fillTemplateFilter('templateCategory', 'category', $('templateCategory')?.value || 'All');
-    updateCategoryVisibility();
-  }
+  if (key === 'section') { fillTemplateFilter('templateSection', 'section', $('templateSection')?.value || 'All'); }
+  if (key === 'category') fillTemplateFilter('templateCategory', 'category', $('templateCategory')?.value || 'All');
   if (key === 'agent') fillTemplateFilter('templateAgent', 'agent', $('templateAgent')?.value || 'All');
   return true;
 }
@@ -134,14 +138,14 @@ function installMetaSelect(id, key) {
   select.dataset.bound = '1';
   select.addEventListener('change', async () => {
     if (select.value !== '__ADD_NEW__') { writeTemplateEditorToModel(); return; }
-    const label = key === 'agent' ? 'AI Tool' : 'Category';
+    const label = key === 'agent' ? 'AI Tool' : key === 'section' ? 'Section' : 'Category';
     const value = window.prompt(`Enter new ${label}:`);
     if (!value || !value.trim()) { populateTemplateEditor(selectedTemplateIndex); return; }
     const clean = value.trim();
     const item = PROMPT_TEMPLATES[selectedTemplateIndex];
     if (!item) return;
     item[key] = clean;
-    if (key === 'category') item.section = clean;
+    
     fillTemplateMetaSelect(id, key, clean);
     syncTemplateTaxonomyToBuilder(key, clean);
     writeTemplateEditorToModel();
@@ -154,7 +158,7 @@ function renderTemplateEditorList() {
   if (!list) return;
   const visible = filteredTemplateIndexes();
   $('templatesCount').textContent = `${visible.length} template${visible.length === 1 ? '' : 's'}`;
-  list.innerHTML = visible.length ? visible.map(({item,i}) => `<button type="button" class="template-editor-item ${i === selectedTemplateIndex ? 'active' : ''}" data-template-index="${i}"><strong>${escapeHtml(templateDisplayName(item,i))}</strong><span>${escapeHtml(item.agent || '')}</span><small>${escapeHtml(templateCategory(item))}</small></button>`).join('') : '<div class="template-empty">No templates match.</div>';
+  list.innerHTML = visible.length ? visible.map(({item,i}) => `<button type="button" class="template-editor-item ${i === selectedTemplateIndex ? 'active' : ''}" data-template-index="${i}"><strong>${escapeHtml(templateDisplayName(item,i))}</strong><span>${escapeHtml(item.agent || '')}</span><small>${escapeHtml(templateSection(item))} · ${escapeHtml(templateCategory(item))}</small></button>`).join('') : '<div class="template-empty">No templates match.</div>';
   list.querySelectorAll('.template-editor-item').forEach(btn => btn.addEventListener('click', () => selectTemplate(Number(btn.dataset.templateIndex))));
 }
 function highlightPromptText(text) {
@@ -220,11 +224,13 @@ function populateTemplateEditor(index) {
   const item = PROMPT_TEMPLATES[index]; if (!item) return;
   $('templateEditorEmpty').hidden = true; $('templateEditorForm').hidden = false;
   $('editorTemplateTitle').textContent = templateDisplayName(item,index);
-  $('editorTemplateMeta').textContent = `${templateCategory(item)} · ${item.agent || ''}`;
+  $('editorTemplateMeta').textContent = `${templateSection(item)} · ${templateCategory(item)} · ${item.agent || ''}`;
   $('editorTemplateName').value = item.name || templateDisplayName(item,index);
-  fillTemplateMetaSelect('editorTemplateSection','category', templateCategory(item));
+  fillTemplateMetaSelect('editorTemplateSection','section', templateSection(item));
+  fillTemplateMetaSelect('editorTemplateCategory','category', templateCategory(item));
   fillTemplateMetaSelect('editorTemplateAgent','agent', item.agent || '');
-  installMetaSelect('editorTemplateSection','category');
+  installMetaSelect('editorTemplateSection','section');
+  installMetaSelect('editorTemplateCategory','category');
   installMetaSelect('editorTemplateAgent','agent');
   $('editorTemplateRating').value = item.effectiveness_rating || 'Average';
   updateEditorRatingStars($('editorTemplateRating').value);
@@ -239,8 +245,8 @@ function writeTemplateEditorToModel() {
   if (selectedTemplateIndex < 0 || !PROMPT_TEMPLATES[selectedTemplateIndex]) return;
   const item = PROMPT_TEMPLATES[selectedTemplateIndex];
   item.name = $('editorTemplateName').value.trim();
-  item.category = $('editorTemplateSection').value.trim();
-  item.section = item.category;
+  item.section = $('editorTemplateSection').value.trim();
+  item.category = $('editorTemplateCategory').value.trim();
   item.agent = $('editorTemplateAgent').value.trim();
   item.effectiveness_rating = $('editorTemplateRating').value;
   item.prompt_template = $('editorPromptTemplate').value;
@@ -253,6 +259,7 @@ function alignTemplateFiltersToCurrentTemplate() {
   const item = PROMPT_TEMPLATES[selectedTemplateIndex];
   if (!item) return;
   const mappings = [
+    ['templateSection', templateSection(item) || 'All'],
     ['templateCategory', templateCategory(item) || 'All'],
     ['templateAgent', item.agent || 'All']
   ];
@@ -267,12 +274,13 @@ function alignTemplateFiltersToCurrentTemplate() {
 }
 function saveTemplateFile() {
   writeTemplateEditorToModel();
+  syncTemplateTaxonomyToBuilder('section', templateSection(PROMPT_TEMPLATES[selectedTemplateIndex] || {}));
   syncTemplateTaxonomyToBuilder('category', templateCategory(PROMPT_TEMPLATES[selectedTemplateIndex] || {}));
   syncTemplateTaxonomyToBuilder('agent', PROMPT_TEMPLATES[selectedTemplateIndex]?.agent || '');
   alignTemplateFiltersToCurrentTemplate();
-  localStorage.setItem('pb-prompt-templates-v1', JSON.stringify({version:'0.1.54', project:'Prompt Builder', templates:PROMPT_TEMPLATES}));
+  localStorage.setItem('pb-prompt-templates-v2', JSON.stringify({version:'0.1.57', project:'Prompt Builder', templates:PROMPT_TEMPLATES}));
   const configSnapshot = JSON.parse(JSON.stringify(CONFIG));
-  if (Array.isArray(configSnapshot?.fields)) configSnapshot.fields.forEach(field => { if (field.id === 'category' || field.id === 'aiTool') delete field.options; });
+  if (Array.isArray(configSnapshot?.fields)) configSnapshot.fields.forEach(field => { if (field.id === 'section' || field.id === 'category' || field.id === 'aiTool') delete field.options; });
   if (configSnapshot?.defaults) { delete configSnapshot.defaults.category; delete configSnapshot.defaults.aiTool; }
   localStorage.setItem('pb-builder-config-v1', JSON.stringify(configSnapshot));
   $('editorSaveStatus').textContent = 'Templates saved';
@@ -295,14 +303,16 @@ function nextTemplateName(category, agent) {
 }
 function addTemplate() {
   const filterState = {
+    section: $('templateSection')?.value || 'All',
     category: $('templateCategory')?.value || 'All',
     agent: $('templateAgent')?.value || 'All'
   };
+  const selectedSection = filterState.section !== 'All' ? filterState.section : '';
   const selectedCategory = filterState.category !== 'All' ? filterState.category : '';
   const selectedAgent = filterState.agent !== 'All' ? filterState.agent : '';
   const newTemplate = {
-    name: nextTemplateName(selectedCategory, selectedAgent),
-    section: selectedCategory,
+    name: nextTemplateName(selectedSection, selectedAgent),
+    section: selectedSection,
     category: selectedCategory,
     agent: selectedAgent,
     prompt_template: 'Create a new production-ready image prompt.\n\nUse the supplied reference description and Configure requirements.',
@@ -310,6 +320,7 @@ function addTemplate() {
   };
   PROMPT_TEMPLATES.push(newTemplate);
   selectedTemplateIndex = PROMPT_TEMPLATES.length - 1;
+  fillTemplateFilter('templateSection','section', filterState.section);
   fillTemplateFilter('templateCategory','category', filterState.category);
   fillTemplateFilter('templateAgent','agent', filterState.agent);
   updateCategoryVisibility();
@@ -337,23 +348,55 @@ function renderTemplates() { renderTemplateEditorList(); if (selectedTemplateInd
 
 async function loadTemplates() {
   try {
-    let data = null;
-    const local = localStorage.getItem('pb-prompt-templates-v1');
-    if (local) {
-      data = JSON.parse(local);
+    const normalize = (item) => {
+      const next = { ...item };
+      next.section = String(next.section || '').trim();
+      next.category = String(next.category || '').trim();
+      next.agent = String(next.agent || '').trim();
+      next.CanBeDeleted = next.CanBeDeleted === true;
+      return next;
+    };
+    const response = await fetch('./prompt_templates.json', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const baseline = await response.json();
+    const baselineTemplates = Array.isArray(baseline?.templates) ? baseline.templates.map(normalize) : [];
+
+    let stored = null;
+    try {
+      const rawV2 = localStorage.getItem('pb-prompt-templates-v2');
+      if (rawV2) stored = JSON.parse(rawV2);
+      if (!stored) {
+        const rawV1 = localStorage.getItem('pb-prompt-templates-v1');
+        if (rawV1) stored = JSON.parse(rawV1);
+      }
+    } catch (_) { stored = null; }
+
+    if (Array.isArray(stored?.templates)) {
+      const localTemplates = stored.templates.map(normalize);
+      const userTemplates = localTemplates.filter(item => item.CanBeDeleted === true);
+      const protectedLocal = localTemplates.filter(item => item.CanBeDeleted !== true);
+      const merged = baselineTemplates.map(baseItem => {
+        const match = protectedLocal.find(localItem =>
+          String(localItem.prompt_template || '') === String(baseItem.prompt_template || '')
+        );
+        return match ? { ...baseItem, ...match, CanBeDeleted: false, section: baseItem.section, category: baseItem.category, agent: baseItem.agent } : baseItem;
+      });
+      const baselineSignatures = new Set(merged.map(item => JSON.stringify({section:item.section,category:item.category,agent:item.agent,prompt_template:item.prompt_template||'',context:item.context||''})));
+      for (const item of userTemplates) {
+        const sig = JSON.stringify({section:item.section,category:item.category,agent:item.agent,prompt_template:item.prompt_template||'',context:item.context||''});
+        if (!baselineSignatures.has(sig)) { merged.push(item); baselineSignatures.add(sig); }
+      }
+      PROMPT_TEMPLATES = merged;
+      localStorage.setItem('pb-prompt-templates-v2', JSON.stringify({version:'0.1.57', project:'Prompt Builder', templates:PROMPT_TEMPLATES}));
     } else {
-      const response = await fetch('./prompt_templates.json', { cache: 'no-store' });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      data = await response.json();
+      PROMPT_TEMPLATES = baselineTemplates;
     }
-    PROMPT_TEMPLATES = Array.isArray(data?.templates)
-      ? data.templates.map(item => ({ ...item, category: item.category || item.section || '', CanBeDeleted: item.CanBeDeleted === true }))
-      : [];
+    fillTemplateFilter('templateSection', 'section');
     fillTemplateFilter('templateCategory', 'category');
     fillTemplateFilter('templateAgent', 'agent');
     refreshBuilderTaxonomy();
     updateCategoryVisibility();
-    ['templateCategory', 'templateAgent'].forEach(id => {
+    ['templateSection', 'templateCategory', 'templateAgent'].forEach(id => {
       const el = $(id);
       if (el && el.dataset.bound !== '1') {
         el.dataset.bound = '1';
@@ -1508,7 +1551,7 @@ $('templateDuplicateBtn')?.addEventListener('click', duplicateTemplate);
 $('templateDeleteBtn')?.addEventListener('click', deleteTemplate);
 $('editorPromptTemplate')?.addEventListener('input', ()=>{writeTemplateEditorToModel();syncPromptHighlight();});
 $('editorPromptTemplate')?.addEventListener('scroll', syncPromptHighlight);
-['editorTemplateName','editorTemplateSection','editorTemplateAgent','editorContext','editorEvaluation'].forEach(id=>$(id)?.addEventListener('input', ()=>{writeTemplateEditorToModel();}));
+['editorTemplateName','editorTemplateSection','editorTemplateCategory','editorTemplateAgent','editorContext','editorEvaluation'].forEach(id=>$(id)?.addEventListener('input', ()=>{writeTemplateEditorToModel();}));
 $('editorTemplateRating')?.addEventListener('change', ()=>{writeTemplateEditorToModel();updateEditorRatingStars($('editorTemplateRating').value);});
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>showTab(t.dataset.tab));
 document.querySelector('.configure .section-head')?.addEventListener('click', () => {

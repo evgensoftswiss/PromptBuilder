@@ -1,8 +1,14 @@
 {
-  "version": "0.1.55",
+  "version": "0.1.57",
   "project": "Prompt Builder",
   "source": "Prompt Library Inventory + sketch.png",
   "fields": [
+    {
+      "id": "section",
+      "label": "Section",
+      "type": "select",
+      "required": true
+    },
     {
       "id": "category",
       "label": "Category",
@@ -176,51 +182,9 @@
       "plastic-looking materials"
     ]
   },
-  "promptTemplates": {
-    "Magnific": "Create a premium image-generation prompt for Magnific. Objective: {category} / {theme}. Build the image around one dominant hero subject or object. Style: {style}. Composition: {composition}. Dimensions: {dimensions}. Color palette: {color palette}. Use the shared Description of references for visual language only. Specify subject placement, scale, background, lighting, materials, textures, depth, atmosphere, supporting elements, and negative constraints. Keep the composition clean, premium, and generation-ready.",
-    "Figma AI": "Create a concise, precise image-generation prompt for Figma AI. Create a {category} / {theme} visual. Style: {style}. Composition: {composition}. Dimensions: {dimensions}. Color palette: {color palette}. Use Description of references only for shared visual characteristics; do not copy artwork or unique objects. Include subject, placement, lighting, materials, background, depth, and what to avoid. Prioritize a clear focal point and readable composition.",
-    "ChatGPT / Codex": "# FINAL IMAGE GENERATION PROMPT\n## 1. Objective Summary\nCreate a premium {format} for {category/campaign}, built around a single hero object or subject: {hero subject}. The image should feel {style}.\n\n## 2. Creative References\nUse the shared Description of references for inspiration only. Do not copy layouts, artwork, exact text, logos, or unique subjects.\n\n## 3. Core Style Rules\nTheme: {theme}\nColor palette: {color palette}\n\n## 4. Composition Specification\nComposition: {composition}\nDimensions: {dimensions}\nDefine hero placement, scale, background, lighting, materials, atmosphere, supporting elements, and visual hierarchy.\n\n## 5. Negative Prompt\nAvoid clutter, multiple focal points, flat lighting, poor spacing, inconsistent reflections, low-quality materials, irrelevant decorative elements, and unwanted cropping."
-  },
   "promptGeneration": {
     "templateSource": "promptTemplates",
     "instructions": "Use the selected AI Tool template as the required structure. Fill it using every meaningful Configure field and the Description of references. Configure has priority over reference guidance if they conflict."
   },
-  "promptTemplateMetadata": {
-    "Magnific": {
-      "source_prompt_id": "PB-008",
-      "effectiveness_label": "Very effective",
-      "validation_status": "Validated",
-      "prompt_type": "Direct image generation",
-      "graphic_type": "Mascot / Character",
-      "best_for": "Premium casino reward chest / mascot-style image or icon generation via Magnific; also usable separately from Magnific Spaces.",
-      "limitations": "Best results depend on adapting colors and reference direction to the specific design context.",
-      "launch_url": "https://www.magnific.com/app/ai-image-generator"
-    },
-    "Figma AI": {
-      "source_prompt_id": "PB-004",
-      "effectiveness_label": "Effective",
-      "validation_status": "Validated",
-      "prompt_type": "Reference-based generation",
-      "graphic_type": "Banner",
-      "best_for": "Reference-based image generation in Figma, especially banners and other flexible formats.",
-      "limitations": "Results depend on prompt detail and balance; the source notes recommend keeping the prompt from becoming overcomplicated.",
-      "launch_url": "https://www.figma.com/ai/"
-    },
-    "ChatGPT / Codex": {
-      "source_prompt_id": "PB-002",
-      "effectiveness_label": "Effective",
-      "validation_status": "Validated",
-      "prompt_type": "Reference-based generation",
-      "graphic_type": "Banner",
-      "best_for": "One-step banner prompt generation based on reference research, with the template completed by a text AI agent.",
-      "limitations": "Requires customization for the specific need; consistency depends on how well the template and reference research are specified.",
-      "launch_url": "https://chatgpt.com/"
-    }
-  },
-  "aiToolLaunchUrls": {
-    "Magnific": "https://www.magnific.com/app/ai-image-generator",
-    "Figma AI": "https://www.figma.com/ai/",
-    "ChatGPT / Codex": "https://chatgpt.com/"
-  },
-  "app_version": "0.1.55"
+  "app_version": "0.1.57"
 }

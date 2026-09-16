@@ -1,5 +1,5 @@
 {
-  "version": "0.1.54",
+  "version": "0.1.57",
   "project": "Prompt Builder",
   "templates": [
     {
@@ -10,7 +10,8 @@
       "context": "Banner generation via one-step json prompt - complete template usin AI (should be specified if using API to create banners via Figma tools, not inside chat)",
       "effectiveness_rating": "Excellent",
       "evaluation": "Very effective in Codex or other chat inner generations, requires customization for specific needs, easy to set up via any AI agent. Results consistent. Note: requires testing with Figmas API to generate banners using only Figma instrument for tokens ecomomy.",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Casino Banners 1"
     },
     {
       "section": "Casino Banners",
@@ -20,7 +21,8 @@
       "context": "Banner generation via one-step prompt, based on references search. Best use case scenario is completing this template using any text agent with prompting like that: ulfill this template of a prompt, to generate ____ (describe your visual idea and context), using this reference research results as a base for style and composition\n ____ (past results of reference search)",
       "effectiveness_rating": "Good",
       "evaluation": "Effective, requires customization for specific needs, easy to set up via any AI agent. Results consistent.",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Casino Banners 2"
     },
     {
       "section": "Casino Banners",
@@ -30,7 +32,8 @@
       "context": "Illustration generation via Figma AI, based on any type of reference that is not photorealistic. Best used with illustration reference, that has consistent style. Works very good with all type of composition, but best result with the most simple instances.",
       "effectiveness_rating": "Average",
       "evaluation": "Midely Effective, results are not consistent depending on input clarity and reference complexity. Work better in more obvious cases.",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Casino Banners 3"
     },
     {
       "section": "Casino Banners",
@@ -40,7 +43,8 @@
       "context": "Illustration generation via Figma AI, based on any type of reference that is not photorealistic. Best used with illustration reference, that has consistent style. Works very good with all type of composition, but best result with the most simple instances.",
       "effectiveness_rating": "Average",
       "evaluation": "Midely Effective, results are not consistent depending on input clarity and reference complexity. Work better in more obvious cases.",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Casino Banners 4"
     },
     {
       "section": "Casino Banners",
@@ -50,7 +54,8 @@
       "context": "Image generation via Figma, better used for banners, versitile, suitable for various formats.",
       "effectiveness_rating": "Good",
       "evaluation": "Effective, although simple, can bring good and consistent results, based on detalisation and balance of the rest of the prompt. Should not be overcomplicated, better used with ChatGPT generative model in Figma Make and Image.",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Casino Banners 5"
     },
     {
       "section": "Casino Banners",
@@ -60,7 +65,8 @@
       "context": "Image regeneration via Figma, better used for banners, versitile, suitable for various formats.",
       "effectiveness_rating": "Good",
       "evaluation": "Effective, although simple, can bring good and consistent results, based on detalisation and balance of the rest of the prompt. Should not be overcomplicated, better used with ChatGPT generative model in Figma Make and Image.",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Casino Banners 6"
     },
     {
       "section": "Casino Banners",
@@ -70,7 +76,8 @@
       "context": "Create or change image (depends on tool used - make or edit) via Figma. Very good for fast changes to fit the composition",
       "effectiveness_rating": "Average",
       "evaluation": "Midely Effective, results are not consistent depending on input clarity and reference complexity, sometimes reasons for results consistency seem to be not obvious at all.",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Casino Banners 7"
     },
     {
       "section": "Casino Banners",
@@ -80,7 +87,8 @@
       "context": "Create an image via Figma. Very good for fast visualisations.",
       "effectiveness_rating": "Needs Improvement",
       "evaluation": "Limited Effective, results are not consistent, since there is no reference, but depending on the model you can get very good starting point at least (ChatGPT model recommended).",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Casino Banners 8"
     },
     {
       "section": "Casino Banners",
@@ -90,7 +98,8 @@
       "context": "Prompt for mascot image/icon generation via Magnific, used in spaces, but also can be used separately.",
       "effectiveness_rating": "Excellent",
       "evaluation": "Very effective Best use case - in magnific spaces, also can be used separately in other agents, since it is ready-made prompt.",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Casino Banners 9"
     },
     {
       "section": "Casino Banners",
@@ -100,7 +109,8 @@
       "context": "Prompt for changing the game icon, card or any other media on the page to the thematic, for example - christmas in one step.",
       "effectiveness_rating": "Excellent",
       "evaluation": "Very effective Works perfectly, even with low resolution reference image. Best use - SuperCasino template",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Casino Banners 10"
     },
     {
       "section": "Casino Banners",
@@ -110,7 +120,8 @@
       "context": "Prompt for character generation with no bg for cards design",
       "effectiveness_rating": "Good",
       "evaluation": "Effective Works perfectly, even with low resolution reference image. Note: style can be adjusted, since it is not able to suite every context. Best use - SuperCasino template",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Casino Banners 11"
     },
     {
       "section": "Casino Banners",
@@ -120,7 +131,8 @@
       "context": "Prompt for bg generation for banner/card",
       "effectiveness_rating": "Average",
       "evaluation": "Midely effective can be random at times, best use is specified description but not in too much detail.",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Casino Banners 12"
     },
     {
       "section": "Casino Banners",
@@ -130,7 +142,8 @@
       "context": "Prompt for misc elements generation for design",
       "effectiveness_rating": "Good",
       "evaluation": "Effective best use - for specific designs and add some reference from that for the style, as well as adjust canvas size for the format.",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Casino Banners 13"
     },
     {
       "section": "Casino Banners",
@@ -140,57 +153,63 @@
       "context": "Prompt for icon set generation",
       "effectiveness_rating": "Good",
       "evaluation": "Effective results are pretty consistent, although require specification and a little bit of complex work",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Casino Banners 14"
     },
     {
-      "section": "Casino Banners",
+      "section": "Sportsbook Banners",
       "category": "Casino Banners",
       "agent": "Magnific",
       "prompt_template": "На изображении _____ (кол-во) спортсмен(-а), снятые в реалистичной студийной манере на полностью белом чистом фоне без теней, текста, графики, декора и любых лишних объектов. Главный акцент только на спортсменах и их форме.\n\nКаждый спортсмен изображен в уникальной форме, соответствующей своему виду спорта. Дизайн формы должен быть максимально близок к референсу по цветовой гамме и визуальному характеру: темно-зеленая основа, салатные элементы, логотип расположен и выполнен точно в стиле референса. Крой, посадка ткани, детали, фактура материала, линии, вставки и общее визуальное впечатление формы должны строго передавать стиль референса, сохраняя сходство по цветам и дизайну.\n\nСпортсмены разные по внешности, возраст ______, представители _____(каких рас), без повторяющихся черт лица. У каждого своя эмоция, индивидуальный характер лица и естественное живое выражение. Телосложение атлетичное, реалистичное, пропорции натуральные. Позы, движения и направление взгляда ориентированы в левую сторону, чтобы композиция выглядела динамично, цельно и согласованно.",
       "context": "Prompt for athlete image generation via Magnific, used in spaces, but also can be used separately. Sportsbook",
       "effectiveness_rating": "Excellent",
       "evaluation": "Very effective Best use case - in magnific spaces, as a part of system of prompts, used in text block as a prompt to create a prompt for the image generator block.",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Sportsbook Banners 15"
     },
     {
-      "section": "Casino Banners",
+      "section": "Sportsbook Banners",
       "category": "Casino Banners",
       "agent": "Magnific",
       "prompt_template": "_____(спортсмен, прим. Футболист) _______(поза, прим. в полный рост в динамичной эмоциональной позе), ____(элемент - мяч например - и его позиция), на основе ____(реф). Форма должна быть переработана в ______(цвета). Сохранить спортивный современный стиль формы: футболка, шорты, гетры, естественная посадка ткани, реалистичные складки и текстура. На груди разместить логотип из ____(файл с лого прикрепленный), как на референсе, аккуратно интегрированный в дизайн формы, четкий, узнаваемый, без искажений. Общий результат должен выглядеть как профессиональная брендированная (вид спорта) форма, фотореалистично, чистый светлый фон, высокая детализация.",
       "context": "Prompt for athlete image generation via Magnific, used in spaces, but also can be used separately. Sportsbook",
       "effectiveness_rating": "Good",
       "evaluation": "Effective Best use case - in magnific spaces, as a part of system of prompts, used in text block as a prompt to create a prompt for the image generator block. Note: requires two images - logo and reference, can be used without, but the results can difffer.",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Sportsbook Banners 16"
     },
     {
-      "section": "Casino Banners",
+      "section": "Sportsbook Banners",
       "category": "Casino Banners",
       "agent": "Magnific",
       "prompt_template": "Создай набор баннерных фонов для спортивной тематики, без людей, логотипов и лишних надписей. Все баннеры должны быть выполнены в едином современном стиле с основным ____ (цвет) и дополнительными акцентами ____(цвет). Визуальный язык — премиальный, сохранить атмосферу референса.",
       "context": "Prompt for bg image generation via Magnific, used in spaces, but also can be used separately. Sportsbook",
       "effectiveness_rating": "Excellent",
       "evaluation": "Very effective Best use case - in magnific spaces, used in text block as a prompt to create a prompt for the image generator block.",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Sportsbook Banners 17"
     },
     {
-      "section": "Casino Banners",
+      "section": "Sportsbook Banners",
       "category": "Casino Banners",
       "agent": "Magnific",
       "prompt_template": "Современный стадион в мрачной премиальной стилистике, вдохновленный атмосферой ____(референс), с доминирующим ____(цвет). Пространство выглядит технологично, строго и дорого: глубокие матовые поверхности, приглушенный свет, графичные линии арены и чистая симметрия. Основная палитра выдержана в насыщенных ______(тона и оттенки), создающих мощное, собранное настроение.\n\nКонтрастные акценты цвета _____ (код цвета) используются аккуратно и точечно: тонкая подсветка по контурам, световые полосы, отдельные элементы навигации, неоновые детали на бортах, колоннах или в интерфейсах экрана. Акценты не перегружают сцену, а мягко подчеркивают архитектуру и усиливают глубину пространства. Общий образ — минималистичный, спортивный, футуристичный и визуально чистый, с ощущением элитной арены высокого уровня.",
       "context": "Prompt for bg image generation via Magnific, used in spaces, but also can be used separately. Sportsbook",
       "effectiveness_rating": "Excellent",
       "evaluation": "Very effective Best use case - in magnific spaces, also can be used separately in other agents, since it is ready-made prompt.",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Sportsbook Banners 18"
     },
     {
-      "section": "Casino Banners",
+      "section": "Sportsbook Banners",
       "category": "Casino Banners",
       "agent": "Magnific",
       "prompt_template": "Premium casino reward chest, cartoon 3D, no pirate theme, redesigned as a luxury jackpot vault with rounded shapes and smooth beveled edges, highly polished materials, glossy metallic trim, _____ (colors) palette, cinematic lighting, global illumination, soft reflections, warm golden glow, high-end mobile game reward design, exaggerated proportions, ultra-clean render, AAA mobile game quality, isolated object, octane render, highly detailed, professional game icon quality, 4K, white background, inspired by ____(reference) but _____ (reference changes)",
       "context": "Prompt for chest image/icon generation via Magnific, used in spaces, but also can be used separately.",
       "effectiveness_rating": "Excellent",
       "evaluation": "Very effective Best use case - in magnific spaces, also can be used separately in other agents, since it is ready-made prompt.",
-      "CanBeDeleted": false
+      "CanBeDeleted": false,
+      "name": "Sportsbook Banners 19"
     }
   ]
 }
