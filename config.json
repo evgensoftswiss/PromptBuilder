@@ -1,5 +1,5 @@
 {
-  "version": "0.1.53",
+  "version": "0.1.54",
   "project": "Prompt Builder",
   "source": "Prompt Library Inventory + sketch.png",
   "fields": [
@@ -168,7 +168,8 @@
           "width": 1080,
           "height": 1920
         }
-      ]
+      ],
+      "addOptionLabel": "+ Add new dimension…"
     }
   ],
   "defaults": {

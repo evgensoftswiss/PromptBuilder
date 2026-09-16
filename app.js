@@ -248,7 +248,7 @@ function saveTemplateFile() {
   syncTemplateTaxonomyToBuilder('category', templateCategory(PROMPT_TEMPLATES[selectedTemplateIndex] || {}));
   syncTemplateTaxonomyToBuilder('agent', PROMPT_TEMPLATES[selectedTemplateIndex]?.agent || '');
   alignTemplateFiltersToCurrentTemplate();
-  localStorage.setItem('pb-prompt-templates-v1', JSON.stringify({version:'0.1.53', project:'Prompt Builder', templates:PROMPT_TEMPLATES}));
+  localStorage.setItem('pb-prompt-templates-v1', JSON.stringify({version:'0.1.54', project:'Prompt Builder', templates:PROMPT_TEMPLATES}));
   localStorage.setItem('pb-builder-config-v1', JSON.stringify(CONFIG));
   $('editorSaveStatus').textContent = 'Templates saved';
   $('editorSaveStatus').style.color = '#047857';
@@ -392,6 +392,7 @@ async function loadConfig() {
   }
   if (!loaded || !Array.isArray(loaded.fields)) throw new Error('Invalid Builder configuration: fields must be an array.');
   CONFIG = loaded;
+  mergeCustomDimensions();
   renderFields();
   setDefaults();
 
@@ -409,6 +410,75 @@ async function loadConfig() {
   requestAnimationFrame(() => {
     if (!hasAllConfigureFields()) { renderFields(); setDefaults(); }
   });
+}
+
+function getCustomDimensions() {
+  try {
+    const raw = localStorage.getItem('pb-custom-dimensions-v1');
+    const data = raw ? JSON.parse(raw) : [];
+    return Array.isArray(data) ? data.filter(item => item && item.value && Number(item.width) > 0 && Number(item.height) > 0) : [];
+  } catch (error) {
+    console.warn('[Prompt Builder] Could not read custom dimensions:', error);
+    return [];
+  }
+}
+
+function saveCustomDimensions(items) {
+  try {
+    localStorage.setItem('pb-custom-dimensions-v1', JSON.stringify(items));
+  } catch (error) {
+    console.warn('[Prompt Builder] Could not save custom dimensions:', error);
+  }
+}
+
+function mergeCustomDimensions() {
+  const field = CONFIG?.fields?.find(item => item.id === 'dimensions');
+  if (!field || !Array.isArray(field.options)) return;
+  const base = field.options.filter(item => item.value !== '__ADD_DIMENSION__');
+  const known = new Set(base.map(item => String(item.value)));
+  getCustomDimensions().forEach(item => {
+    if (!known.has(String(item.value))) {
+      base.push({ value: item.value, label: item.label || item.value, width: Number(item.width), height: Number(item.height), custom: true });
+    }
+  });
+  field.options = base;
+}
+
+function createDimensionOption() {
+  const field = CONFIG?.fields?.find(item => item.id === 'dimensions');
+  if (!field) return;
+  const select = $('field-dimensions');
+  if (!select) return;
+  const current = select.value;
+  const raw = window.prompt('Enter dimensions (for example: 1200 x 628):', '1200 x 628');
+  if (!raw) { select.value = current; return; }
+  const match = String(raw).trim().match(/^(\d{2,5})\s*[xX×]\s*(\d{2,5})$/);
+  if (!match) {
+    alert('Please enter dimensions in the format WIDTH x HEIGHT.');
+    select.value = current;
+    return;
+  }
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  const orientation = width === height ? 'Square' : (width > height ? 'Landscape' : 'Portrait');
+  const value = `${width} x ${height} (${orientation})`;
+  if (field.options.some(item => item.value === value)) {
+    select.value = value;
+    saveBuilderState();
+    return;
+  }
+  const item = { value, label: value, width, height, custom: true };
+  field.options.push(item);
+  const custom = getCustomDimensions().filter(existing => existing.value !== value);
+  custom.push(item);
+  saveCustomDimensions(custom);
+  persistConfigToDisk();
+  const option = document.createElement('option');
+  option.value = value;
+  option.textContent = value;
+  select.insertBefore(option, select.querySelector('option[value="__ADD_DIMENSION__"]') || null);
+  select.value = value;
+  saveBuilderState();
 }
 
 function renderFields() {
@@ -476,8 +546,26 @@ function hasAllConfigureFields() {
 function buildSelect(field) {
   const select = document.createElement('select');
   select.id = `field-${field.id}`;
-  field.options.forEach(o => { const option = document.createElement('option'); option.value = o.value; option.textContent = o.label; select.appendChild(option); });
-  select.addEventListener('change', () => { saveBuilderState(); if (field.id === 'aiTool') updateOpenToolButton(); });
+  field.options.forEach(o => {
+    const option = document.createElement('option');
+    option.value = o.value;
+    option.textContent = o.label;
+    select.appendChild(option);
+  });
+  if (field.id === 'dimensions') {
+    const add = document.createElement('option');
+    add.value = '__ADD_DIMENSION__';
+    add.textContent = field.addOptionLabel || '+ Add new dimension…';
+    select.appendChild(add);
+  }
+  select.addEventListener('change', () => {
+    if (field.id === 'dimensions' && select.value === '__ADD_DIMENSION__') {
+      createDimensionOption();
+      return;
+    }
+    saveBuilderState();
+    if (field.id === 'aiTool') updateOpenToolButton();
+  });
   return select;
 }
 
@@ -698,7 +786,7 @@ function getConfigValues() {
 function buildLocalPrompt(values) {
   const desc = $('referenceDescription').value.trim();
   const paletteColors = Array.isArray(values.palette) ? values.palette : [];
-  const dims = CONFIG.fields.find(f=>f.id==='dimensions').options.find(o=>o.value===values.dimensions);
+  const dims = CONFIG.fields.find(f=>f.id==='dimensions').options.find(o=>o.value===values.dimensions && o.value !== '__ADD_DIMENSION__');
   return [
     `Create a premium ${values.style.toLowerCase()} promotional ${values.category.toLowerCase()} banner for ${values.theme}.`,
     `Use a ${values.composition.toLowerCase()} composition at ${dims?.width || 1920}x${dims?.height || 700}.`,
@@ -1359,6 +1447,8 @@ $('generateBtn').onclick=async()=>{
 };
 $('copyPromptBtn').onclick=()=>copyText($('finalPrompt').value);
 $('copyPromptIcon').onclick=()=>copyText($('finalPrompt').value);
+$('copyTemplateBtn')?.addEventListener('click',()=>copyText($('editorPromptTemplate')?.value || ''));
+$('copyTemplateIcon')?.addEventListener('click',()=>copyText($('editorPromptTemplate')?.value || ''));
 $('copyJsonBtn').onclick=()=>copyText(JSON.stringify({configuration:getConfigValues(), referenceDescription:$('referenceDescription').value, prompt:$('finalPrompt').value},null,2));
 $('copyRefBtn').onclick=()=>copyText($('referenceDescription').value);
 $('saveBtn').onclick=async()=>{try{await savePreset();}catch(e){alert(`Could not save preset: ${e.message}`)}};
