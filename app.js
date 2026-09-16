@@ -163,7 +163,7 @@ function renderTemplateEditorList() {
   if (!list) return;
   const visible = filteredTemplateIndexes();
   $('templatesCount').textContent = `${visible.length} template${visible.length === 1 ? '' : 's'}`;
-  list.innerHTML = visible.length ? visible.map(({item,i}) => `<button type="button" class="template-editor-item ${i === selectedTemplateIndex ? 'active' : ''}" data-template-index="${i}"><strong>${escapeHtml(templateDisplayName(item,i))}</strong><small>${escapeHtml(templateCategory(item))} · ${escapeHtml(templateSection(item))} · ${escapeHtml(item.agent || '')}</small></button>`).join('') : '<div class="template-empty">No templates match.</div>';
+  list.innerHTML = visible.length ? visible.map(({item,i}) => `<button type="button" class="template-editor-item ${i === selectedTemplateIndex ? 'active' : ''}" data-template-index="${i}"><strong>${escapeHtml(templateDisplayName(item,i))}</strong><small>${escapeHtml(templateSection(item))} · ${escapeHtml(templateCategory(item))} · ${escapeHtml(item.agent || '')}</small></button>`).join('') : '<div class="template-empty">No templates match.</div>';
   list.querySelectorAll('.template-editor-item').forEach(btn => btn.addEventListener('click', () => selectTemplate(Number(btn.dataset.templateIndex))));
 }
 function highlightPromptText(text) {
@@ -262,7 +262,7 @@ function populateTemplateEditor(index) {
   const item = PROMPT_TEMPLATES[index]; if (!item) return;
   $('templateEditorEmpty').hidden = true; $('templateEditorForm').hidden = false;
   $('editorTemplateTitle').textContent = templateDisplayName(item,index);
-  $('editorTemplateMeta').textContent = `${templateCategory(item)} · ${templateSection(item)} · ${item.agent || ''}`;
+  $('editorTemplateMeta').textContent = `${templateSection(item)} · ${templateCategory(item)} · ${item.agent || ''}`;
   $('editorTemplateName').value = item.name || templateDisplayName(item,index);
   fillTemplateMetaSelect('editorTemplateSection','section', templateSection(item));
   fillTemplateMetaSelect('editorTemplateCategory','category', templateCategory(item));
@@ -280,7 +280,15 @@ function populateTemplateEditor(index) {
   updateTemplateDeleteState();
   renderTemplateEditorList();
 }
-function writeTemplateEditorToModel() {
+let persistTemplateTimer = null;
+function queueUserTemplatePersistence() {
+  if (selectedTemplateIndex < 0) return;
+  const item = PROMPT_TEMPLATES[selectedTemplateIndex];
+  if (!item || isBaselineTemplate(item)) return;
+  clearTimeout(persistTemplateTimer);
+  persistTemplateTimer = setTimeout(() => { persistUserTemplates(); }, 120);
+}
+function writeTemplateEditorToModel(options = {}) {
   if (selectedTemplateIndex < 0 || !PROMPT_TEMPLATES[selectedTemplateIndex]) return;
   const item = PROMPT_TEMPLATES[selectedTemplateIndex];
   if (isBaselineTemplate(item)) return;
@@ -293,6 +301,12 @@ function writeTemplateEditorToModel() {
   item.context = $('editorContext').value;
   item.evaluation = $('editorEvaluation').value;
   item.updatedAt = new Date().toISOString();
+  renderTemplateEditorList();
+  const title = $('editorTemplateTitle');
+  if (title) title.textContent = templateDisplayName(item, selectedTemplateIndex);
+  const meta = $('editorTemplateMeta');
+  if (meta) meta.textContent = `${templateSection(item)} · ${templateCategory(item)} · ${item.agent || ''}`;
+  if (!options.skipPersist) queueUserTemplatePersistence();
 }
 
 function alignTemplateFiltersToCurrentTemplate() {
@@ -320,7 +334,8 @@ async function saveTemplateFile() {
   syncTemplateTaxonomyToBuilder('category', templateCategory(PROMPT_TEMPLATES[selectedTemplateIndex] || {}));
   syncTemplateTaxonomyToBuilder('agent', PROMPT_TEMPLATES[selectedTemplateIndex]?.agent || '');
   alignTemplateFiltersToCurrentTemplate();
-  await persistUserTemplates();
+  const persisted = await persistUserTemplates();
+  if (!persisted) throw new Error('Could not persist user template');
   const configSnapshot = JSON.parse(JSON.stringify(CONFIG));
   if (Array.isArray(configSnapshot?.fields)) configSnapshot.fields.forEach(field => { if (field.id === 'section' || field.id === 'category' || field.id === 'aiTool') delete field.options; });
   if (configSnapshot?.defaults) { delete configSnapshot.defaults.category; delete configSnapshot.defaults.aiTool; }
@@ -377,7 +392,25 @@ async function addTemplate() {
   populateTemplateEditor(selectedTemplateIndex);
 }
 
-async function duplicateTemplate() { if (selectedTemplateIndex < 0) return; const source = PROMPT_TEMPLATES[selectedTemplateIndex]; const copy = JSON.parse(JSON.stringify(source)); copy.id = nextUserTemplateId(); copy._source = 'user'; copy.name = `${templateDisplayName(source, selectedTemplateIndex)} Copy`; copy.createdAt = new Date().toISOString(); copy.updatedAt = copy.createdAt; PROMPT_TEMPLATES.splice(selectedTemplateIndex + 1, 0, copy); selectedTemplateIndex += 1; await persistUserTemplates(); renderTemplateEditorList(); populateTemplateEditor(selectedTemplateIndex); alignTemplateFiltersToCurrentTemplate(); }
+async function duplicateTemplate() {
+  if (selectedTemplateIndex < 0) return;
+  const source = PROMPT_TEMPLATES[selectedTemplateIndex];
+  if (!source) return;
+  const copy = JSON.parse(JSON.stringify(source));
+  copy.id = nextUserTemplateId();
+  copy._source = 'user';
+  copy.name = `${templateDisplayName(source, selectedTemplateIndex)} Copy`;
+  copy.createdAt = new Date().toISOString();
+  copy.updatedAt = copy.createdAt;
+  PROMPT_TEMPLATES.splice(selectedTemplateIndex + 1, 0, copy);
+  selectedTemplateIndex += 1;
+  const persisted = await persistUserTemplates();
+  if (!persisted) console.warn('[Prompt Builder] Duplicate template persistence failed.');
+  renderTemplateEditorList();
+  populateTemplateEditor(selectedTemplateIndex);
+  alignTemplateFiltersToCurrentTemplate();
+}
+
 async function deleteTemplate() {
   if (selectedTemplateIndex < 0) return;
   if (isBaselineTemplate(PROMPT_TEMPLATES[selectedTemplateIndex])) { updateTemplateDeleteState(); return; }
@@ -483,13 +516,13 @@ async function persistUserTemplates() {
   const users = PROMPT_TEMPLATES.filter(item => item?._source === 'user').map(item => { const copy = {...item}; delete copy._source; return copy; });
   if (window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local') {
     try {
-      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.67', project:'Prompt Builder', templates:users}) });
+      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.69', project:'Prompt Builder', templates:users}) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return true;
     } catch (error) { console.warn('[Prompt Builder] Could not save local user templates:', error); return false; }
   }
   try {
-    const payload = {version:'0.1.67', project:'Prompt Builder', templates:users};
+    const payload = {version:'0.1.69', project:'Prompt Builder', templates:users};
     localStorage.setItem(USER_TEMPLATES_STORAGE_KEY, JSON.stringify(payload));
     // Verify the write so GitHub Pages failures are visible immediately.
     const verify = localStorage.getItem(USER_TEMPLATES_STORAGE_KEY);
@@ -1666,7 +1699,7 @@ let __restoringBuilderState = false;
 function saveBuilderState() {
   if (__restoringBuilderState || !CONFIG?.fields || !hasAllConfigureFields()) return false;
   try {
-    const payload = { version:'0.1.67', savedAt:new Date().toISOString(), values:getConfigValues(), referenceDescription:$('referenceDescription')?.value||'', finalPrompt:$('finalPrompt')?.value||'', presetName:$('presetName')?.value||'' };
+    const payload = { version:'0.1.69', savedAt:new Date().toISOString(), values:getConfigValues(), referenceDescription:$('referenceDescription')?.value||'', finalPrompt:$('finalPrompt')?.value||'', presetName:$('presetName')?.value||'' };
     localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify(payload));
     return true;
   }
