@@ -1,17 +1,17 @@
 {
-  "version": "0.1.62",
+  "version": "0.1.64",
   "project": "Prompt Builder",
   "source": "Prompt Library Inventory + sketch.png",
   "fields": [
     {
-      "id": "section",
-      "label": "Section",
+      "id": "category",
+      "label": "Category",
       "type": "select",
       "required": true
     },
     {
-      "id": "category",
-      "label": "Category",
+      "id": "section",
+      "label": "Section",
       "type": "select",
       "required": true
     },
@@ -186,5 +186,10 @@
     "templateSource": "promptTemplates",
     "instructions": "Use the selected AI Tool template as the required structure. Fill it using every meaningful Configure field and the Description of references. Configure has priority over reference guidance if they conflict."
   },
-  "app_version": "0.1.62"
+  "app_version": "0.1.64",
+  "aiToolLaunchUrls": {
+    "Magnific": "https://www.magnific.com/app/ai-image-generator",
+    "ChatGPT / Codex": "https://chatgpt.com/",
+    "Figma AI": "https://www.figma.com/"
+  }
 }

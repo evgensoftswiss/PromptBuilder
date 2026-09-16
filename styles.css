@@ -160,3 +160,6 @@
 .brand small.app-version{font-size:10px;font-weight:600;color:#98a2b3;margin-left:5px;vertical-align:baseline}
 #clearLocalStorageBtn{transition:background-color .15s ease,color .15s ease}
 #clearLocalStorageBtn:hover:not(:disabled){background-color:#b91c1c;color:#fff}
+
+/* Read-only template fields remain visually enabled and selectable. */
+.readonly-field { opacity: 1; color: inherit; background: inherit; cursor: default; }

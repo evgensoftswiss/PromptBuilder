@@ -212,9 +212,21 @@ function configureVariableMap() {
 }
 function templateSignature(item) { return JSON.stringify({section:String(item?.section||'').trim(),category:String(item?.category||'').trim(),agent:String(item?.agent||'').trim(),prompt_template:String(item?.prompt_template||'').trim()}); }
 function isBaselineTemplate(item) { return !!item && (item._source === 'builtin' || BASELINE_TEMPLATE_IDS.has(Number(item.id)) || BASELINE_TEMPLATE_SIGNATURES.has(templateSignature(item))); }
-function setTemplateEditorDisabled(disabled) {
-  ['editorTemplateName','editorTemplateSection','editorTemplateCategory','editorTemplateAgent','editorTemplateRating','editorPromptTemplate','editorContext','editorEvaluation'].forEach(id => { const el=$(id); if (el) el.disabled=disabled; });
-  const save=$('templateSaveBtn'); if (save) save.disabled=disabled;
+function setTemplateEditorDisabled(readOnly) {
+  const ids = ['editorTemplateName','editorTemplateSection','editorTemplateCategory','editorTemplateAgent','editorTemplateRating','editorPromptTemplate','editorContext','editorEvaluation'];
+  ids.forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    el.readOnly = !!readOnly && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
+    el.classList.toggle('readonly-field', !!readOnly);
+    if (el.tagName === 'SELECT') {
+      el.dataset.readonly = readOnly ? '1' : '0';
+      el.setAttribute('aria-readonly', readOnly ? 'true' : 'false');
+      el.tabIndex = readOnly ? -1 : 0;
+      el.style.pointerEvents = readOnly ? 'none' : '';
+    }
+  });
+  const save=$('templateSaveBtn'); if (save) save.disabled=!!readOnly;
 }
 function updateTemplateDeleteState() {
   const btn = $('templateDeleteBtn');
@@ -451,12 +463,12 @@ async function persistUserTemplates() {
   const users = PROMPT_TEMPLATES.filter(item => item?._source === 'user');
   if (window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local') {
     try {
-      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.63', project:'Prompt Builder', templates:users}) });
+      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.64', project:'Prompt Builder', templates:users}) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return true;
     } catch (error) { console.warn('[Prompt Builder] Could not save local user templates:', error); return false; }
   }
-  try { localStorage.setItem('pb-user-templates-v4', JSON.stringify({version:'0.1.63', project:'Prompt Builder', templates:users})); return true; }
+  try { localStorage.setItem('pb-user-templates-v4', JSON.stringify({version:'0.1.64', project:'Prompt Builder', templates:users})); return true; }
   catch(error){ console.warn('[Prompt Builder] Could not save user templates:', error); return false; }
 }
 
@@ -1580,7 +1592,7 @@ const TOOL_LINKS = {
 function updateOpenToolButton() {
   const aiTool = $('field-aiTool')?.value || 'Magnific';
   const launchUrls = CONFIG?.aiToolLaunchUrls || {};
-  const target = { label: TOOL_LINKS[aiTool]?.label || aiTool, url: launchUrls[aiTool] || 'about:blank' };
+  const target = { label: TOOL_LINKS[aiTool]?.label || aiTool, url: launchUrls[aiTool] || 'https://chatgpt.com/' };
   if ($('toolName')) $('toolName').textContent = target.label;
   $('openToolBtn').dataset.url = target.url;
 }
