@@ -155,3 +155,8 @@
 
 .settings-storage-controls{margin-top:18px;padding-top:18px;border-top:1px solid var(--border)}
 .settings-storage-controls button{width:100%}
+
+/* PB0.1.63 */
+.brand small.app-version{font-size:10px;font-weight:600;color:#98a2b3;margin-left:5px;vertical-align:baseline}
+#clearLocalStorageBtn{transition:background-color .15s ease,color .15s ease}
+#clearLocalStorageBtn:hover:not(:disabled){background-color:#b91c1c;color:#fff}

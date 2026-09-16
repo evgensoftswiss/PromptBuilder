@@ -13,6 +13,7 @@ let PROMPT_TEMPLATES = [];
 let selectedTemplateIndex = -1;
 let BASELINE_TEMPLATE_MAX_ID = 0;
 let BASELINE_TEMPLATE_IDS = new Set();
+let BASELINE_TEMPLATE_SIGNATURES = new Set();
 
 const TEMPLATE_RATING = { Excellent: 5, Good: 4, Average: 3, 'Needs Improvement': 2 };
 function templateStars(value) {
@@ -30,6 +31,8 @@ function templateTaxonomyValues(key) {
 
 function refreshBuilderTaxonomy() {
   if (!CONFIG?.fields || !Array.isArray(PROMPT_TEMPLATES)) return;
+  const ensureTaxonomyFields = [ ['section','Section'], ['category','Category'], ['aiTool','AI Tool'] ];
+  for (const [id,label] of ensureTaxonomyFields) { if (!CONFIG.fields.some(f => f.id === id)) CONFIG.fields.unshift({id,label,type:'select',required:true}); }
   const sections = templateTaxonomyValues('section');
   const categories = templateTaxonomyValues('category');
   const agents = templateTaxonomyValues('agent');
@@ -207,7 +210,8 @@ function configureVariableMap() {
   map.references = ref;
   return map;
 }
-function isBaselineTemplate(item) { return !!item && BASELINE_TEMPLATE_IDS.has(Number(item.id)); }
+function templateSignature(item) { return JSON.stringify({section:String(item?.section||'').trim(),category:String(item?.category||'').trim(),agent:String(item?.agent||'').trim(),prompt_template:String(item?.prompt_template||'').trim()}); }
+function isBaselineTemplate(item) { return !!item && (item._source === 'builtin' || BASELINE_TEMPLATE_IDS.has(Number(item.id)) || BASELINE_TEMPLATE_SIGNATURES.has(templateSignature(item))); }
 function setTemplateEditorDisabled(disabled) {
   ['editorTemplateName','editorTemplateSection','editorTemplateCategory','editorTemplateAgent','editorTemplateRating','editorPromptTemplate','editorContext','editorEvaluation'].forEach(id => { const el=$(id); if (el) el.disabled=disabled; });
   const save=$('templateSaveBtn'); if (save) save.disabled=disabled;
@@ -382,7 +386,9 @@ async function loadTemplates() {
     const baseline = await response.json();
     const baselineTemplates = Array.isArray(baseline?.templates) ? baseline.templates.map(normalize) : [];
     BASELINE_TEMPLATE_MAX_ID = baselineTemplates.reduce((m, item) => Math.max(m, Number(item.id) || 0), 0);
+    baselineTemplates.forEach(item => { item._source = 'builtin'; });
     BASELINE_TEMPLATE_IDS = new Set(baselineTemplates.map(item => Number(item.id)).filter(Number.isFinite));
+    BASELINE_TEMPLATE_SIGNATURES = new Set(baselineTemplates.map(templateSignature));
     BASELINE_TEMPLATE_MAX_ID = baselineTemplates.reduce((m, item) => Math.max(m, Number(item.id) || 0), 0);
     let usedIds = new Set(baselineTemplates.map(item => item.id).filter(Number.isFinite));
 
@@ -399,21 +405,22 @@ async function loadTemplates() {
       let nextId = Math.max(BASELINE_TEMPLATE_MAX_ID, ...candidates.map(x => Number(x?.id) || 0));
       for (const rawItem of candidates) {
         const item = normalize(rawItem);
-        const legacyUser = rawItem?.CanBeDeleted === true || !BASELINE_TEMPLATE_IDS.has(Number(item.id));
-        if (isBaselineTemplate(item) || !legacyUser) continue;
+        const looksLikeBaseline = BASELINE_TEMPLATE_IDS.has(Number(item.id)) || BASELINE_TEMPLATE_SIGNATURES.has(templateSignature(item));
+        if (looksLikeBaseline) continue;
         delete item.CanBeDeleted;
+        item._source = 'user';
         if (!Number.isFinite(item.id) || item.id <= BASELINE_TEMPLATE_MAX_ID || usedIds.has(item.id)) item.id = ++nextId;
         usedIds.add(item.id);
         userTemplates.push(item);
       }
     } catch (_) { userTemplates = []; }
 
-    const dedupe = new Set(baselineTemplates.map(item => JSON.stringify({section:item.section,category:item.category,agent:item.agent,prompt_template:item.prompt_template||''})));
+    const dedupe = new Set(baselineTemplates.map(templateSignature));
     userTemplates = userTemplates.filter(item => {
-      const sig=JSON.stringify({section:item.section,category:item.category,agent:item.agent,prompt_template:item.prompt_template||''});
+      const sig=templateSignature(item);
       if (dedupe.has(sig)) return false; dedupe.add(sig); return true;
     });
-    PROMPT_TEMPLATES = [...baselineTemplates, ...userTemplates];
+    PROMPT_TEMPLATES = [...baselineTemplates, ...userTemplates.map(item => ({...item, _source:'user'}))];
     if (!(window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local')) persistUserTemplates();
 
     fillTemplateFilter('templateSection', 'section');
@@ -441,15 +448,15 @@ async function loadTemplates() {
 }
 
 async function persistUserTemplates() {
-  const users = PROMPT_TEMPLATES.filter(item => !isBaselineTemplate(item));
+  const users = PROMPT_TEMPLATES.filter(item => item?._source === 'user');
   if (window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local') {
     try {
-      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.62', project:'Prompt Builder', templates:users}) });
+      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.63', project:'Prompt Builder', templates:users}) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return true;
     } catch (error) { console.warn('[Prompt Builder] Could not save local user templates:', error); return false; }
   }
-  try { localStorage.setItem('pb-user-templates-v4', JSON.stringify({version:'0.1.62', project:'Prompt Builder', templates:users})); return true; }
+  try { localStorage.setItem('pb-user-templates-v4', JSON.stringify({version:'0.1.63', project:'Prompt Builder', templates:users})); return true; }
   catch(error){ console.warn('[Prompt Builder] Could not save user templates:', error); return false; }
 }
 
