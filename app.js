@@ -330,6 +330,12 @@ function alignTemplateFiltersToCurrentTemplate() {
 async function saveTemplateFile() {
   if (selectedTemplateIndex < 0 || isBaselineTemplate(PROMPT_TEMPLATES[selectedTemplateIndex])) { updateTemplateDeleteState(); return; }
   writeTemplateEditorToModel();
+  const validationErrors = validateUserTemplate(PROMPT_TEMPLATES[selectedTemplateIndex], selectedTemplateIndex);
+  if (validationErrors.length) {
+    const saveStatus = $('editorSaveStatus');
+    if (saveStatus) { saveStatus.textContent = validationErrors.join(' '); saveStatus.style.color = '#b91c1c'; }
+    throw new Error(validationErrors.join(' '));
+  }
   syncTemplateTaxonomyToBuilder('section', templateSection(PROMPT_TEMPLATES[selectedTemplateIndex] || {}));
   syncTemplateTaxonomyToBuilder('category', templateCategory(PROMPT_TEMPLATES[selectedTemplateIndex] || {}));
   syncTemplateTaxonomyToBuilder('agent', PROMPT_TEMPLATES[selectedTemplateIndex]?.agent || '');
@@ -520,13 +526,13 @@ async function persistUserTemplates() {
   const users = PROMPT_TEMPLATES.filter(item => item?._source === 'user').map(item => { const copy = {...item}; delete copy._source; return copy; });
   if (window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local') {
     try {
-      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.70', project:'Prompt Builder', templates:users}) });
+      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.71', project:'Prompt Builder', templates:users}) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return true;
     } catch (error) { console.warn('[Prompt Builder] Could not save local user templates:', error); return false; }
   }
   try {
-    const payload = {version:'0.1.70', project:'Prompt Builder', templates:users};
+    const payload = {version:'0.1.71', project:'Prompt Builder', templates:users};
     localStorage.setItem(USER_TEMPLATES_STORAGE_KEY, JSON.stringify(payload));
     // Verify the write so GitHub Pages failures are visible immediately.
     const verify = localStorage.getItem(USER_TEMPLATES_STORAGE_KEY);
@@ -988,25 +994,139 @@ function buildLocalPrompt(values) {
   ].join('\n');
 }
 
-function deriveRecommendation(values) {
-  const meta = CONFIG?.promptTemplateMetadata?.[values.aiTool] || {};
-  const effectiveness = meta.effectiveness_label || 'Not evaluated';
-  const validation = meta.validation_status || 'Not evaluated';
-  const starMap = {
-    'Very effective': '★★★★★',
-    'Effective': '★★★★☆',
-    'Moderately effective': '★★★☆☆',
-    'Limited / needs improvement': '★★☆☆☆'
+
+function findSelectedTemplateForValues(values) {
+  const section = String(values?.section || '').trim();
+  const category = String(values?.category || '').trim();
+  const aiTool = String(values?.aiTool || '').trim();
+  const exact = PROMPT_TEMPLATES.find(item =>
+    templateSection(item) === section &&
+    templateCategory(item) === category &&
+    String(item?.agent || '').trim() === aiTool
+  );
+  if (exact) return exact;
+  const sectionCategory = PROMPT_TEMPLATES.find(item => templateSection(item) === section && templateCategory(item) === category && agentMatchesToolLocal(item.agent, aiTool));
+  if (sectionCategory) return sectionCategory;
+  return PROMPT_TEMPLATES.find(item => agentMatchesToolLocal(item.agent, aiTool)) || null;
+}
+function updateSelectedTemplateInfo(values = getConfigValues()) {
+  const node = $('selectedTemplateInfo');
+  if (!node) return null;
+  const match = findSelectedTemplateForValues(values || {});
+  node.innerHTML = match ? `Template: <strong>${escapeHtml(templateDisplayName(match, PROMPT_TEMPLATES.indexOf(match)))}</strong> <span class="muted">· ${escapeHtml(templateSection(match))} · ${escapeHtml(templateCategory(match))} · ${escapeHtml(match.agent || '')}</span>` : 'Template: —';
+  return match;
+}
+function setAiSuggestions(style, composition) {
+  const box = $('aiSuggestions');
+  if (!box) return;
+  $('aiSuggestedStyle').textContent = style || '—';
+  $('aiSuggestedComposition').textContent = composition || '—';
+  box.hidden = !(style || composition);
+  box.dataset.style = style || '';
+  box.dataset.composition = composition || '';
+}
+function applyAiSuggestions() {
+  const box = $('aiSuggestions');
+  if (!box) return;
+  const style = box.dataset.style || '';
+  const composition = box.dataset.composition || '';
+  const styleEl = $('field-style');
+  const compositionEl = $('field-composition');
+  if (styleEl && style && [...styleEl.options].some(o => o.value === style)) styleEl.value = style;
+  if (compositionEl && composition && [...compositionEl.options].some(o => o.value === composition)) compositionEl.value = composition;
+  saveBuilderState();
+  box.hidden = true;
+}
+function validateUserTemplate(item, index = -1) {
+  const errors = [];
+  const name = String(item?.name || '').trim();
+  const section = String(item?.section || '').trim();
+  const category = String(item?.category || '').trim();
+  const agent = String(item?.agent || '').trim();
+  const prompt = String(item?.prompt_template || '').trim();
+  if (!name) errors.push('Name is required.');
+  if (!section) errors.push('Section is required.');
+  if (!category) errors.push('Category is required.');
+  if (!agent) errors.push('AI Tool is required.');
+  if (!prompt) errors.push('Prompt template cannot be empty.');
+  const id = Number(item?.id);
+  if (!Number.isFinite(id) || id <= BASELINE_TEMPLATE_MAX_ID) errors.push('User template must have a valid unique ID.');
+  const duplicateId = PROMPT_TEMPLATES.some((other, i) => i !== index && Number(other?.id) === id);
+  if (duplicateId) errors.push(`Template ID ${id} is already used.`);
+  const duplicateName = PROMPT_TEMPLATES.some((other, i) => i !== index && String(other?.name || '').trim().toLowerCase() === name.toLowerCase());
+  if (duplicateName) errors.push(`Template name "${name}" already exists.`);
+  return errors;
+}
+function exportUserData() {
+  const users = PROMPT_TEMPLATES.filter(item => item?._source === 'user').map(item => ({...item, _source: undefined})).map(item => { delete item._source; return item; });
+  const settings = JSON.parse(localStorage.getItem('pb-ai-settings') || '{}');
+  const builderRaw = localStorage.getItem(BUILDER_STATE_KEY) || '';
+  const data = {
+    format: 'prompt-builder-user-data',
+    version: '0.1.71',
+    exportedAt: new Date().toISOString(),
+    userTemplates: users,
+    presets: SAVED_PRESETS,
+    customDimensions: getCustomDimensions(),
+    builderState: builderRaw ? JSON.parse(builderRaw) : null,
+    aiSettings: { provider: settings.provider || '', baseUrl: settings.baseUrl || '', model: settings.model || '', models: settings.models || {} }
   };
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='prompt-builder-user-data.json'; a.click();
+  URL.revokeObjectURL(url);
+}
+async function importUserData(file) {
+  const text = await file.text();
+  const data = JSON.parse(text);
+  if (!data || data.format !== 'prompt-builder-user-data') throw new Error('Invalid Prompt Builder user data file.');
+  const incoming = Array.isArray(data.userTemplates) ? data.userTemplates : [];
+  const maxId = Math.max(BASELINE_TEMPLATE_MAX_ID, ...PROMPT_TEMPLATES.map(item => Number(item.id) || 0), ...incoming.map(item => Number(item.id) || 0));
+  let nextId = maxId;
+  const existingIds = new Set(PROMPT_TEMPLATES.map(item => Number(item.id)));
+  const importedUsers = incoming.map(item => {
+    const copy = {...item, _source:'user'};
+    let id = Number(copy.id);
+    if (!Number.isFinite(id) || id <= BASELINE_TEMPLATE_MAX_ID || existingIds.has(id)) id = ++nextId;
+    copy.id = id; existingIds.add(id); return copy;
+  });
+  PROMPT_TEMPLATES = [...PROMPT_TEMPLATES.filter(item => item?._source === 'builtin'), ...PROMPT_TEMPLATES.filter(item => item?._source === 'user'), ...importedUsers];
+  // Remove exact user duplicates after import.
+  const seen = new Set();
+  PROMPT_TEMPLATES = PROMPT_TEMPLATES.filter(item => {
+    if (item._source !== 'user') return true;
+    const key = `${item.id}|${item.name}|${item.prompt_template}`;
+    if (seen.has(key)) return false; seen.add(key); return true;
+  });
+  SAVED_PRESETS = Array.isArray(data.presets) ? data.presets.slice(-20) : SAVED_PRESETS;
+  savePresetsToStorage();
+  if (Array.isArray(data.customDimensions)) saveCustomDimensions(data.customDimensions);
+  if (data.builderState) localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify(data.builderState));
+  if (data.aiSettings) localStorage.setItem('pb-ai-settings', JSON.stringify({...JSON.parse(localStorage.getItem('pb-ai-settings') || '{}'), ...data.aiSettings}));
+  const saved = await persistUserTemplates();
+  if (!saved) throw new Error('Could not persist imported user templates.');
+  renderPresetOptions();
+  mergeCustomDimensions();
+  refreshBuilderTaxonomy();
+  renderTemplates();
+  restoreBuilderState();
+}
+
+function deriveRecommendation(values) {
+  const meta = findSelectedTemplateForValues(values || {}) || {};
+  const effectiveness = meta.effectiveness_rating || meta.effectiveness_label || 'Not evaluated';
+  const validation = meta.validation_status || 'Validated';
+  const starMap = { 'Excellent':'★★★★★', 'Good':'★★★★☆', 'Average':'★★★☆☆', 'Needs Improvement':'★★☆☆☆', 'Very effective':'★★★★★', 'Effective':'★★★★☆', 'Moderately effective':'★★★☆☆', 'Limited / needs improvement':'★★☆☆☆' };
   $('ratingStars').textContent = starMap[effectiveness] || '☆☆☆☆☆';
   $('ratingStars').title = effectiveness;
   $('ratingScore').textContent = meta.prompt_type || '';
   $('validationBadge').textContent = validation;
   $('validationBadge').className = `badge ${validation === 'Validated' ? 'green' : 'gray'}`;
-  $('bestFor').textContent = meta.best_for || 'No source-backed recommendation available.';
-  const chips = [values.aiTool, meta.prompt_type, meta.graphic_type].filter(Boolean);
+  $('bestFor').textContent = meta.best_for || meta.context || 'No source-backed recommendation available.';
+  const chips = [meta.agent, meta.prompt_type, meta.graphic_type].filter(Boolean);
   $('recommendations').innerHTML = chips.map(x=>`<span class="chip">${escapeHtml(x)}</span>`).join('');
-  $('limitations').textContent = meta.limitations || 'No source-backed limitation recorded.';
+  $('limitations').textContent = meta.evaluation || 'No source-backed limitation recorded.';
+  updateSelectedTemplateInfo(values);
 }
 
 function generateMockAnalysis() {
@@ -1161,11 +1281,12 @@ async function analyzeReferences() {
   console.log('[Prompt Builder] Reference analysis instruction sent to AI:\n' + instruction);
   console.log('[Prompt Builder] Reference images sent: ' + images.length);
   console.log('[Prompt Builder] Reference analysis request:', {settings:{provider:settings.provider,baseUrl:settings.baseUrl,model:settings.model}, instruction, imageCount:images.length});
-  const raw = await callVisionBrowser(settings,[{role:'system',content:'You are Prompt Builder\'s visual reference analyst. Analyze ONLY the attached image(s). Builder configuration is not provided and must not be used. Return valid JSON with exactly two fields: description (string) and palette (array of 1 to 8 uppercase HEX colors).',},{role:'user',content:[{type:'text',text:instruction},...images.map(url=>({type:'image_url',image_url:{url}}))]}]);
+  const raw = await callVisionBrowser(settings,[{role:'system',content:'You are Prompt Builder\'s visual reference analyst. Analyze ONLY the attached image(s). Builder configuration is not provided and must not be used. Return valid JSON with exactly three fields: description (string), palette (array of 1 to 8 uppercase HEX colors), and suggestions (object with style and composition strings).',},{role:'user',content:[{type:'text',text:instruction},...images.map(url=>({type:'image_url',image_url:{url}}))]}]);
   const data = parseAiJson(raw);
   $('referenceDescription').value = data.description || '';
   const aiPalette = Array.isArray(data.palette) ? data.palette.slice(0, 8) : [];
   setReferencePalette(aiPalette);
+  setAiSuggestions(String(data?.suggestions?.style || ''), String(data?.suggestions?.composition || ''));
   console.log('[Prompt Builder] Palette returned by AI:', aiPalette);
   $('statusBadge').textContent = 'Analyzed';
   currentResult = { referenceDescription: data.description || '', palette: getPaletteColors() };
@@ -1180,7 +1301,7 @@ async function generateFinalWithAI(referenceDescription) {
   const values = getConfigValues();
   const aiTool = String(values?.aiTool || '').trim();
   const storedTemplates = PROMPT_TEMPLATES || [];
-  const match = storedTemplates.find(t => agentMatchesToolLocal(t.agent, aiTool)) || storedTemplates.find(t => String(t.agent||'').trim()===aiTool);
+  const match = findSelectedTemplateForValues(values) || storedTemplates.find(t => agentMatchesToolLocal(t.agent, aiTool)) || storedTemplates.find(t => String(t.agent||'').trim()===aiTool);
   const template = String(match?.prompt_template || '').trim();
   if (!template) throw new Error(`No prompt template configured for AI Tool: ${aiTool || 'Unknown'}`);
   const configLines = Object.entries(values || {}).map(([key,value]) => `${key}: ${Array.isArray(value)?value.filter(Boolean).join(', '): (value ?? '')}`).join('\n');
@@ -1642,6 +1763,10 @@ $('copyTemplateBtn')?.addEventListener('click',()=>copyText($('editorPromptTempl
 $('copyTemplateIcon')?.addEventListener('click',()=>copyText($('editorPromptTemplate')?.value || ''));
 $('copyJsonBtn').onclick=()=>copyText(JSON.stringify({configuration:getConfigValues(), referenceDescription:$('referenceDescription').value, prompt:$('finalPrompt').value},null,2));
 $('copyRefBtn').onclick=()=>copyText($('referenceDescription').value);
+$('applyAiSuggestionsBtn')?.addEventListener('click', applyAiSuggestions);
+$('exportUserDataBtn')?.addEventListener('click', exportUserData);
+$('importUserDataBtn')?.addEventListener('click', ()=>$('importUserDataInput')?.click());
+$('importUserDataInput')?.addEventListener('change', async (e)=>{ const file=e.target.files?.[0]; if(!file) return; try{ await importUserData(file); alert('User data imported.'); }catch(err){ alert(`Could not import user data: ${err.message}`); } finally { e.target.value=''; } });
 $('saveBtn').onclick=async()=>{try{await savePreset();}catch(e){alert(`Could not save preset: ${e.message}`)}};
 $('presetMenuToggle').onclick=togglePresetMenu;
 $('presetName').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); loadPresetByName($('presetName').value.trim()); $('presetMenu').hidden = true; } });
@@ -1682,6 +1807,7 @@ $( 'editorPromptTemplate')?.addEventListener('beforeinput', (event)=>{ if ($('ed
 $( 'editorPromptTemplate')?.addEventListener('paste', (event)=>{ if ($('editorPromptTemplate').dataset.readonly === '1') event.preventDefault(); });
 $( 'editorPromptTemplate')?.addEventListener('drop', (event)=>{ if ($('editorPromptTemplate').dataset.readonly === '1') event.preventDefault(); });
 $('editorTemplateRating')?.addEventListener('change', ()=>{writeTemplateEditorToModel();updateEditorRatingStars($('editorTemplateRating').value);});
+document.querySelectorAll('#dynamicFields select').forEach(el=>el.addEventListener('change', ()=>{saveBuilderState(); updateSelectedTemplateInfo();}));
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>showTab(t.dataset.tab));
 document.querySelector('.configure .section-head')?.addEventListener('click', () => {
   // Configure is intentionally non-collapsible. Verify the fields remain mounted.
@@ -1703,7 +1829,7 @@ let __restoringBuilderState = false;
 function saveBuilderState() {
   if (__restoringBuilderState || !CONFIG?.fields || !hasAllConfigureFields()) return false;
   try {
-    const payload = { version:'0.1.70', savedAt:new Date().toISOString(), values:getConfigValues(), referenceDescription:$('referenceDescription')?.value||'', finalPrompt:$('finalPrompt')?.value||'', presetName:$('presetName')?.value||'' };
+    const payload = { version:'0.1.71', savedAt:new Date().toISOString(), values:getConfigValues(), referenceDescription:$('referenceDescription')?.value||'', finalPrompt:$('finalPrompt')?.value||'', presetName:$('presetName')?.value||'' };
     localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify(payload));
     return true;
   }
@@ -1774,6 +1900,7 @@ function bindBuilderStatePersistence(){
   if (root) {
     root.addEventListener('input', saveBuilderState, true);
     root.addEventListener('change', saveBuilderState, true);
+    root.addEventListener('change', () => { try { updateSelectedTemplateInfo(); deriveRecommendation(getConfigValues()); } catch (_) {} }, true);
   }
   window.addEventListener('beforeunload',saveBuilderState);
   window.addEventListener('pagehide',saveBuilderState);
