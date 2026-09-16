@@ -1,0 +1,245 @@
+{
+  "schema_version": "1.0",
+  "default_provider": "openai",
+  "providers": [
+    {
+      "id": "openai",
+      "label": "OpenAI",
+      "base_url": "https://api.openai.com/v1",
+      "api_key": {
+        "required": true,
+        "placeholder": "sk-...",
+        "setup": {
+          "title": "How to get an OpenAI API key",
+          "steps": [
+            {
+              "text": "Open the OpenAI API Keys page and sign in.",
+              "link": {
+                "text": "Open the OpenAI API Keys page",
+                "url": "https://platform.openai.com/api-keys"
+              }
+            },
+            "Create a new secret key for your project.",
+            "Copy the key immediately and paste it into Prompt Builder.",
+            "Click “Test connection & load models” to verify it."
+          ]
+        }
+      },
+      "models": {
+        "list_mode": "openai_compatible",
+        "vision_only": true,
+        "vision_detection": "name_patterns",
+        "vision_patterns": [
+          "gpt-4o",
+          "gpt-4.1",
+          "gpt-4.5",
+          "gpt-5",
+          "o1",
+          "o3",
+          "o4",
+          "gpt-4-vision"
+        ],
+        "exclude_patterns": [
+          "audio",
+          "transcribe",
+          "tts",
+          "embedding",
+          "moderation",
+          "realtime"
+        ]
+      },
+      "help": "OpenAI API. Enter your API key, then load the available Vision-capable models.",
+      "details": "The app validates the key through the provider model endpoint and filters for Vision-capable models."
+    },
+    {
+      "id": "google",
+      "label": "Google Gemini",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta",
+      "api_key": {
+        "required": true,
+        "placeholder": "AIza...",
+        "setup": {
+          "title": "How to get a Google Gemini API key",
+          "steps": [
+            {
+              "text": "Open Google AI Studio and sign in with your Google account.",
+              "link": {
+                "text": "Open Google AI Studio",
+                "url": "https://aistudio.google.com/app/apikey"
+              }
+            },
+            "Open the API Keys page.",
+            "Create a new API key (Google AI Studio can create a project for you).",
+            "Copy the key, paste it into Prompt Builder, then test the connection."
+          ]
+        }
+      },
+      "models": {
+        "list_mode": "google_gemini",
+        "vision_only": true,
+        "vision_detection": "name_patterns",
+        "vision_patterns": [
+          "gemini-"
+        ],
+        "exclude_patterns": [
+          "-image",
+          "-tts",
+          "-audio",
+          "-embedding",
+          "-imagen",
+          "veo",
+          "lyria"
+        ]
+      },
+      "help": "Google Gemini API. Enter your API key, then load the available image-input models.",
+      "details": "The app loads models from the Gemini API and keeps models that support generateContent with image input."
+    },
+    {
+      "id": "mistral",
+      "label": "Mistral AI",
+      "base_url": "https://api.mistral.ai/v1",
+      "api_key": {
+        "required": true,
+        "placeholder": "Mistral API key",
+        "setup": {
+          "title": "How to get a Mistral API key",
+          "steps": [
+            {
+              "text": "Open Mistral Studio API Keys and sign in.",
+              "link": {
+                "text": "Open Mistral Studio API Keys",
+                "url": "https://console.mistral.ai/api-keys"
+              }
+            },
+            "Click Create new key and give it a recognizable name.",
+            "Copy the key immediately and paste it into Prompt Builder.",
+            "Click “Test connection & load models” to verify it."
+          ]
+        }
+      },
+      "models": {
+        "list_mode": "openai_compatible",
+        "vision_only": true,
+        "vision_detection": "capabilities_object"
+      },
+      "help": "Mistral API with native Vision capability metadata.",
+      "details": "Prompt Builder reads capabilities.vision from the Mistral model catalog, so only models explicitly marked Vision-capable are shown."
+    },
+    {
+      "id": "groq",
+      "label": "Groq",
+      "base_url": "https://api.groq.com/openai/v1",
+      "api_key": {
+        "required": true,
+        "placeholder": "gsk_...",
+        "setup": {
+          "title": "How to get a Groq API key",
+          "steps": [
+            {
+              "text": "Open the Groq API Keys page and sign in.",
+              "link": {
+                "text": "Open the Groq API Keys page",
+                "url": "https://console.groq.com/keys"
+              }
+            },
+            "Click Create API Key.",
+            "Copy the key and paste it into Prompt Builder.",
+            "Click “Test connection & load models” to verify it."
+          ]
+        }
+      },
+      "models": {
+        "list_mode": "openai_compatible",
+        "vision_only": true,
+        "vision_detection": "name_patterns",
+        "vision_patterns": [
+          "qwen/qwen3.6-27b"
+        ],
+        "exclude_patterns": []
+      },
+      "help": "GroqCloud API. Only Groq models documented for image input are offered.",
+      "details": "Groq uses an OpenAI-compatible API. The Vision allow-list is configurable because its /models response does not expose a universal Vision capability flag."
+    },
+    {
+      "id": "ollama",
+      "label": "Ollama",
+      "base_url": "http://localhost:11434",
+      "api_key": {
+        "required": false,
+        "placeholder": "Not required for local Ollama"
+      },
+      "models": {
+        "list_mode": "ollama_tags",
+        "vision_only": true,
+        "vision_detection": "capabilities"
+      },
+      "help": "Local Ollama server. No API key is required for the standard local endpoint.",
+      "details": "The app loads installed models and enables only models with Vision capability."
+    },
+    {
+      "id": "openrouter",
+      "label": "OpenRouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key": {
+        "required": true,
+        "placeholder": "sk-or-v1-...",
+        "setup": {
+          "title": "How to get an OpenRouter API key",
+          "steps": [
+            {
+              "text": "Open OpenRouter Keys and sign in.",
+              "link": {
+                "text": "Open OpenRouter Keys",
+                "url": "https://openrouter.ai/settings/keys"
+              }
+            },
+            "Create a new API key.",
+            "Copy the key and paste it into Prompt Builder.",
+            "Click “Test connection & load models” to verify it."
+          ]
+        }
+      },
+      "models": {
+        "list_mode": "openai_compatible",
+        "vision_only": true,
+        "vision_detection": "input_modalities"
+      },
+      "help": "OpenRouter provides one API for many model vendors.",
+      "details": "Prompt Builder checks model input modalities and shows only models whose metadata explicitly includes image input."
+    },
+    {
+      "id": "openai-compatible",
+      "label": "OpenAI-compatible",
+      "base_url": "http://localhost:8000/v1",
+      "api_key": {
+        "required": true,
+        "placeholder": "API key",
+        "setup": {
+          "title": "How to get an API key",
+          "steps": [
+            "Open your provider’s dashboard or admin panel.",
+            "Find API Keys, Access Tokens, or Developer Settings.",
+            "Create a key that can access the provider’s model API.",
+            "Paste the key here and test the connection."
+          ],
+          "link_label": "Open provider dashboard"
+        }
+      },
+      "models": {
+        "list_mode": "openai_compatible",
+        "vision_only": true,
+        "vision_detection": "name_patterns",
+        "vision_patterns": [],
+        "exclude_patterns": []
+      },
+      "help": "Any provider exposing an OpenAI-compatible /models and /chat/completions API.",
+      "details": "Use this for compatible gateways or self-hosted inference endpoints."
+    }
+  ],
+  "notes": {
+    "mock_mode": "Mock mode changes analysis/generation behavior only. It does not disable provider connection or Vision model loading.",
+    "vision_filtering": "Only providers with reliable capability metadata use metadata filtering. Other providers use configurable model-name patterns and exclusions from this file.",
+    "credential_storage": "Provider API keys are stored per provider in the browser localStorage. GitHub Pages has no server-side secret storage in this mode; keys never go into repository files."
+  },
+  "version": "0.1.53"
+}

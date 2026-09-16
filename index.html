@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Prompt Builder 0.1.53</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><div class="brand-mark">◇</div><div>Prompt Builder</div></div>
+    <nav class="tabs">
+      <button class="tab active" data-tab="builder">Builder</button>
+      <button class="tab" data-tab="templates">Templates</button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="builder" class="view active-view">
+      <div class="grid">
+        <section class="card references-panel">
+          <div class="section-head"><h2>1. References</h2><span class="info">i</span></div>
+          <div id="dropzone" class="dropzone">
+            <input id="fileInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden />
+            <div class="upload-icon">↥</div>
+            <strong>Drag images here<br/>or click to upload</strong>
+            <span>JPG, PNG, WEBP · Max 10 MB each</span>
+          </div>
+          <div id="thumbs" class="thumbs"></div>
+          <div class="subhead">Description of references</div>
+          <textarea id="referenceDescription" class="reference-box" placeholder="AI-generated reference description will appear here..."></textarea>
+          <div class="inline-actions"><button class="primary small" id="analyzeBtn">✦ Analyze with AI</button><button class="secondary small" id="copyRefBtn">{} Copy Description</button></div>
+        </section>
+
+        <aside class="card configure">
+          <div class="section-head"><h2>2. Configure</h2></div>
+          <div id="dynamicFields"></div>
+          <div class="actions">
+            <button class="primary" id="generateBtn">✦ Generate Prompt</button>
+            <div class="preset-row">
+              <div class="preset-field">
+                <label for="presetName">Preset</label>
+                <div class="preset-picker" id="presetPicker">
+                  <div class="preset-input-wrap"><input id="presetName" placeholder="Select or enter preset name" autocomplete="off" /><button type="button" class="preset-toggle" id="presetMenuToggle" aria-label="Show saved presets">▾</button></div>
+                  <div class="preset-menu" id="presetMenu" hidden></div>
+                </div>
+              </div>
+              <button class="secondary small preset-delete" id="presetDeleteBtn" title="Delete selected preset" aria-label="Delete selected preset">×</button>
+            </div>
+            <button class="secondary" id="saveBtn">♡ Save to My Prompts</button>
+          </div>
+        </aside>
+
+        <section class="card result-panel">
+          <div class="section-head"><h2>3. Result</h2><span id="statusBadge" class="badge gray"></span></div>
+          <div class="subhead">Final Prompt</div>
+          <div class="prompt-box"><button class="copy-icon" id="copyPromptIcon">⧉</button><textarea id="finalPrompt"></textarea></div>
+          <div class="result-actions"><button class="primary" id="copyPromptBtn">⧉ Copy Prompt</button><button class="secondary" id="copyJsonBtn">{} Copy JSON</button></div>
+          <div class="divider"></div>
+          <div class="subhead">Оценка и рекомендации</div>
+          <div class="rating-box">
+            <div class="rating-row"><span>Эффективность</span><strong id="ratingStars">Not evaluated</strong><b id="ratingScore"></b><span id="validationBadge" class="badge gray">Not evaluated</span></div><div class="rec-grid"><div><small>Лучше всего для:</small><p id="bestFor">No source-backed recommendation available.</p></div><div><small>Рекомендовано для:</small><div id="recommendations" class="chips"></div></div><div><small>Ограничения:</small><p id="limitations">No source-backed limitation recorded.</p></div></div>
+          </div>
+          <button class="open-btn" id="openToolBtn">Open in <b id="toolName">Magnific</b></button>
+        </section>
+      </div>
+      <footer class="workflow">
+        <div><b>1. References</b><span>Upload images and analyze with AI</span></div>
+        <div><b>2. Configure</b><span>Select type, tool and key parameters</span></div>
+        <div><b>3. Generate</b><span>Create your optimized prompt</span></div>
+        <div><b>4. Use</b><span>Copy and use in your AI tool</span></div>
+      </footer>
+    </section>
+
+    <section id="templates" class="view">
+      <div class="templates-page">
+        <div class="templates-header">
+          <div><h1>Prompt Templates</h1><p class="muted">Edit the templates used to build final prompts.</p></div>
+          <div class="templates-toolbar"><span id="templatesCount" class="templates-count"></span><button class="primary small" id="templateAddBtn">+ Add template</button></div>
+        </div>
+        <div class="template-editor-layout">
+          <aside class="card template-editor-sidebar">
+            <div class="template-filter-grid">
+              <label>Category<select id="templateCategory"></select></label>
+              <label>AI Tool<select id="templateAgent"></select></label>
+            </div>
+            <div id="templateEditorList" class="template-editor-list" aria-live="polite"></div>
+          </aside>
+          <section class="card template-editor-main">
+            <div id="templateEditorEmpty" class="template-editor-empty">Select a template to edit.</div>
+            <div id="templateEditorForm" hidden>
+              <div class="template-editor-top">
+                <div><h2 id="editorTemplateTitle">Template</h2><p id="editorTemplateMeta" class="muted"></p></div>
+                <div class="template-editor-actions"><button class="secondary small" id="templateDuplicateBtn">Duplicate</button><button class="secondary small" id="templateDeleteBtn" disabled>Delete</button><button class="primary small" id="templateSaveBtn">Save templates</button></div>
+              </div>
+              <div class="template-editor-grid">
+                <label>Name<input id="editorTemplateName" placeholder="Template name" /></label>
+                <label>Category<select id="editorTemplateSection"></select></label>
+                <label>AI Tool<select id="editorTemplateAgent"></select></label>
+                <div class="effectiveness-field"><label for="editorTemplateRating">Effectiveness</label><div class="effectiveness-control"><select id="editorTemplateRating"><option>Excellent</option><option>Good</option><option>Average</option><option>Needs Improvement</option></select><strong id="editorTemplateRatingStars" aria-label="Effectiveness stars"></strong></div></div>
+              </div>
+              <div class="template-editor-workspace">
+                <div>
+                  <div class="template-editor-block">
+                    <div class="editor-label-row"><label>Prompt template<div class="code-editor"><pre id="editorPromptHighlight" aria-hidden="true"></pre><textarea id="editorPromptTemplate" spellcheck="false" aria-label="Prompt template"></textarea></div></label></div>
+                  </div>
+                  <div class="template-editor-grid">
+                    <label>Context<textarea id="editorContext"></textarea></label>
+                    <label>Usage notes<textarea id="editorEvaluation"></textarea></label>
+                  </div>
+                </div>
+              </div>
+              <div id="editorSaveStatus" class="connection-status"></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section id="settings" class="view">
+      <div class="settings-layout">
+        <div class="card settings-card">
+          <h2>AI connection</h2>
+          <p class="muted">Use one vision-capable model for reference analysis and final prompt generation. API keys are stored locally in this browser profile. GitHub Pages uses no application server.</p>
+
+          <label>Provider<select id="provider"></select></label>
+          <label>Base URL<input id="baseUrl" placeholder="Provider endpoint" /></label>
+          <label id="apiKeyField">API Key<input id="apiKey" type="password" placeholder="Enter provider API key" /></label>
+          <div id="apiKeyHelp" class="api-key-help" hidden></div>
+
+          <label>Vision model
+            <select id="model" disabled>
+              <option value="">Connect provider to load Vision models</option>
+            </select>
+            <span id="modelHint" class="field-hint">Only models detected as Vision-capable will appear.</span>
+          </label>
+
+          <div class="setting-row"><label class="switch"><input id="mockMode" type="checkbox" checked /><span></span></label><span>Mock mode (works without API key)</span></div>
+          <div class="setting-actions">
+            <button class="primary" id="testConnectionBtn">Test connection & load models</button>
+            <button class="secondary small" id="clearConnectionBtn">Clear</button>
+          </div>
+          <div id="connectionStatus" class="connection-status">Not tested</div>
+        </div>
+        <div class="card settings-card">
+          <h2>Provider setup</h2>
+          <p id="providerHelp" class="muted"></p>
+          <div id="providerDetails" class="provider-details"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <div id="aiLoadingOverlay" class="ai-loading-overlay" hidden aria-live="polite"><div class="ai-loading-card"><div class="ai-spinner"></div><div id="aiLoadingMessage" class="ai-loading-message">Working with AI…</div><div class="ai-loading-sub">Please wait for the response.</div></div></div>
+  <!-- Static GitHub Pages build; all mutable user data is stored in localStorage. -->
+  <script>window.__PROMPT_BUILDER_CONFIG__ = {"version":"2026-08-20","project":"Prompt Builder","source":"Prompt Library Inventory + sketch.png","fields":[{"id":"category","label":"Category","type":"select","required":true,"options":[{"value":"Sportsbook","label":"Sportsbook"},{"value":"Casino","label":"Casino"}]},{"id":"aiTool","label":"AI Tool","type":"select","required":true,"options":[{"value":"Magnific","label":"Magnific"},{"value":"Figma AI","label":"Figma AI"},{"value":"ChatGPT / Codex","label":"ChatGPT / Codex"}]},{"id":"style","label":"Style","type":"select","required":true,"options":[{"value":"Premium / Cinematic","label":"Premium / Cinematic"},{"value":"Editorial / Luxury","label":"Editorial / Luxury"},{"value":"Modern","label":"Modern"},{"value":"Stylized Illustration","label":"Stylized Illustration"},{"value":"Cartoony / Realistic","label":"Cartoony / Realistic"},{"value":"Photorealistic","label":"Photorealistic"}]},{"id":"theme","label":"Theme","type":"select","required":true,"options":[{"value":"Champions League","label":"Champions League"},{"value":"Football / Matchday","label":"Football / Matchday"},{"value":"Casino Jackpot","label":"Casino Jackpot"},{"value":"Holiday / Seasonal","label":"Holiday / Seasonal"},{"value":"Custom","label":"Custom"}]},{"id":"composition","label":"Composition","type":"select","required":true,"options":[{"value":"Athlete right / Text left","label":"Athlete right / Text left"},{"value":"Hero object right / Text left","label":"Hero object right / Text left"},{"value":"Centered hero / Text below","label":"Centered hero / Text below"},{"value":"Split layout","label":"Split layout"},{"value":"Full image / Dark overlay","label":"Full image / Dark overlay"}]},{"id":"palette","label":"Color Palette","type":"palette","required":true,"slots":10,"defaultColors":["#000000","#FFFFFF"]},{"id":"dimensions","label":"Dimensions","type":"select","required":true,"options":[{"value":"1920 x 700 (Landscape)","label":"1920 x 700 (Landscape)","width":1920,"height":700},{"value":"1600 x 600 (Landscape)","label":"1600 x 600 (Landscape)","width":1600,"height":600},{"value":"1080 x 1080 (Square)","label":"1080 x 1080 (Square)","width":1080,"height":1080},{"value":"1080 x 1920 (Portrait)","label":"1080 x 1920 (Portrait)","width":1080,"height":1920}]}],"defaults":{"category":"Sportsbook","aiTool":"Magnific","style":"Premium / Cinematic","theme":"Champions League","composition":"Athlete right / Text left","dimensions":"1920 x 700 (Landscape)"},"promptLibrary":{"referenceBasedGeneration":"Use references for inspiration only. Do not copy layouts or artwork.","compositionRules":["one dominant focal point","supporting elements remain secondary","clear negative space for headline/copy","premium lighting and depth","balanced hierarchy","avoid visual clutter"],"negativePrompt":["overcrowded compositions","visual noise","flat lighting","oversaturated palettes","multiple focal points","poor spacing","busy backgrounds","low-poly geometry","plastic-looking materials"]},"promptTemplates":{"Magnific":"Create a premium image-generation prompt for Magnific. Objective: {category} / {theme}. Build the image around one dominant hero subject or object. Style: {style}. Composition: {composition}. Dimensions: {dimensions}. Color palette: {color palette}. Use the shared Description of references for visual language only. Specify subject placement, scale, background, lighting, materials, textures, depth, atmosphere, supporting elements, and negative constraints. Keep the composition clean, premium, and generation-ready.","Figma AI":"Create a concise, precise image-generation prompt for Figma AI. Create a {category} / {theme} visual. Style: {style}. Composition: {composition}. Dimensions: {dimensions}. Color palette: {color palette}. Use Description of references only for shared visual characteristics; do not copy artwork or unique objects. Include subject, placement, lighting, materials, background, depth, and what to avoid. Prioritize a clear focal point and readable composition.","ChatGPT / Codex":"# FINAL IMAGE GENERATION PROMPT\n## 1. Objective Summary\nCreate a premium {format} for {category/campaign}, built around a single hero object or subject: {hero subject}. The image should feel {style}.\n\n## 2. Creative References\nUse the shared Description of references for inspiration only. Do not copy layouts, artwork, exact text, logos, or unique subjects.\n\n## 3. Core Style Rules\nTheme: {theme}\nColor palette: {color palette}\n\n## 4. Composition Specification\nComposition: {composition}\nDimensions: {dimensions}\nDefine hero placement, scale, background, lighting, materials, atmosphere, supporting elements, and visual hierarchy.\n\n## 5. Negative Prompt\nAvoid clutter, multiple focal points, flat lighting, poor spacing, inconsistent reflections, low-quality materials, irrelevant decorative elements, and unwanted cropping."},"promptGeneration":{"templateSource":"promptTemplates","instructions":"Use the selected AI Tool template as the required structure. Fill it using every meaningful Configure field and the Description of references. Configure has priority over reference guidance if they conflict."},"aiToolLaunchUrls":{"Magnific":"https://www.magnific.com/app/ai-image-generator","Figma AI":"https://www.figma.com/ai/","ChatGPT / Codex":"https://chatgpt.com/"}};</script>
+<script src="app.js"></script>
+</body>
+</html>
