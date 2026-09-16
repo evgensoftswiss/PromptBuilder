@@ -163,7 +163,7 @@ function renderTemplateEditorList() {
   if (!list) return;
   const visible = filteredTemplateIndexes();
   $('templatesCount').textContent = `${visible.length} template${visible.length === 1 ? '' : 's'}`;
-  list.innerHTML = visible.length ? visible.map(({item,i}) => `<button type="button" class="template-editor-item ${i === selectedTemplateIndex ? 'active' : ''}" data-template-index="${i}"><strong>${escapeHtml(templateDisplayName(item,i))}</strong><small>${escapeHtml(templateSection(item))} · ${escapeHtml(templateCategory(item))} · ${escapeHtml(item.agent || '')}</small></button>`).join('') : '<div class="template-empty">No templates match.</div>';
+  list.innerHTML = visible.length ? visible.map(({item,i}) => `<button type="button" class="template-editor-item ${i === selectedTemplateIndex ? 'active' : ''}" data-template-index="${i}"><strong>${escapeHtml(templateDisplayName(item,i))}</strong><small>${escapeHtml(templateSection(item))} · ${escapeHtml(templateCategory(item))}</small><span>${escapeHtml(item.agent || '')}</span></button>`).join('') : '<div class="template-empty">No templates match.</div>';
   list.querySelectorAll('.template-editor-item').forEach(btn => btn.addEventListener('click', () => selectTemplate(Number(btn.dataset.templateIndex))));
 }
 function highlightPromptText(text) {
@@ -457,36 +457,40 @@ async function loadTemplates() {
 
     let userTemplates = [];
     try {
+      const sources = [];
+      const readStorage = (key) => { try { return localStorage.getItem(key); } catch (_) { return null; } };
+      const currentRaw = readStorage(USER_TEMPLATES_STORAGE_KEY);
+      if (currentRaw) sources.push({ raw: currentRaw, key: USER_TEMPLATES_STORAGE_KEY });
+      for (const key of ['pb-user-templates-v5','pb-user-templates-v4','pb-user-templates-v3','pb-prompt-templates-v2','pb-prompt-templates-v1']) {
+        const raw = readStorage(key); if (raw) sources.push({ raw, key });
+      }
       let candidates = [];
-      if (window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local') {
-        const r = await fetch('./user_templates.json', { cache: 'no-store' });
-        if (r.ok) { const stored = await r.json(); candidates = Array.isArray(stored?.templates) ? stored.templates : []; }
-      } else {
-        const raw = localStorage.getItem(USER_TEMPLATES_STORAGE_KEY) || localStorage.getItem('pb-user-templates-v4') || localStorage.getItem('pb-user-templates-v3') || localStorage.getItem('pb-prompt-templates-v2') || localStorage.getItem('pb-prompt-templates-v1');
-        if (raw) { const stored = JSON.parse(raw); candidates = Array.isArray(stored?.templates) ? stored.templates : (Array.isArray(stored) ? stored : []); }
+      let sourceKey = null;
+      for (const source of sources) {
+        try {
+          const stored = JSON.parse(source.raw);
+          const list = Array.isArray(stored?.templates) ? stored.templates : (Array.isArray(stored) ? stored : null);
+          if (Array.isArray(list)) { candidates = list; sourceKey = source.key; break; }
+        } catch (_) {}
       }
       let nextId = Math.max(BASELINE_TEMPLATE_MAX_ID, ...candidates.map(x => Number(x?.id) || 0));
       for (const rawItem of candidates) {
         const item = normalize(rawItem);
-        // localStorage / user_templates.json contains user templates only.
-        // A user duplicate may intentionally have the same content signature as a builtin,
-        // so never discard a user template by comparing prompt content to baseline signatures.
-        // Only baseline IDs are reserved for immutable source templates.
-        const looksLikeBaseline = BASELINE_TEMPLATE_IDS.has(Number(item.id));
-        if (looksLikeBaseline) continue;
+        if (BASELINE_TEMPLATE_IDS.has(Number(item.id))) continue;
         delete item.CanBeDeleted;
         item._source = 'user';
         if (!Number.isFinite(item.id) || item.id <= BASELINE_TEMPLATE_MAX_ID || usedIds.has(item.id)) item.id = ++nextId;
         usedIds.add(item.id);
         userTemplates.push(item);
       }
+      if (sourceKey && sourceKey !== USER_TEMPLATES_STORAGE_KEY && userTemplates.length) {
+        // Migrate legacy user templates to the dedicated current key.
+        void persistUserTemplates();
+      }
     } catch (_) { userTemplates = []; }
 
-    // User templates are intentionally allowed to duplicate builtin content.
-    // They are distinguished by their own IDs/source and must survive reloads.
     userTemplates = userTemplates.filter(Boolean);
     PROMPT_TEMPLATES = [...baselineTemplates, ...userTemplates.map(item => ({...item, _source:'user'}))];
-    if (!(window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local')) persistUserTemplates();
 
     fillTemplateFilter('templateSection', 'section');
     fillTemplateFilter('templateCategory', 'category');
@@ -516,13 +520,13 @@ async function persistUserTemplates() {
   const users = PROMPT_TEMPLATES.filter(item => item?._source === 'user').map(item => { const copy = {...item}; delete copy._source; return copy; });
   if (window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local') {
     try {
-      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.69', project:'Prompt Builder', templates:users}) });
+      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.70', project:'Prompt Builder', templates:users}) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return true;
     } catch (error) { console.warn('[Prompt Builder] Could not save local user templates:', error); return false; }
   }
   try {
-    const payload = {version:'0.1.69', project:'Prompt Builder', templates:users};
+    const payload = {version:'0.1.70', project:'Prompt Builder', templates:users};
     localStorage.setItem(USER_TEMPLATES_STORAGE_KEY, JSON.stringify(payload));
     // Verify the write so GitHub Pages failures are visible immediately.
     const verify = localStorage.getItem(USER_TEMPLATES_STORAGE_KEY);
@@ -1692,14 +1696,14 @@ $('model').addEventListener('change', () => {
   updateMockModeState();
 });
 
-const USER_TEMPLATES_STORAGE_KEY = 'pb-user-templates-v5';
+const USER_TEMPLATES_STORAGE_KEY = 'pb-user-templates-v6';
 const BUILDER_STATE_KEY = 'pb-builder-state-v2';
 const BUILDER_STATE_LEGACY_KEY = 'pb-builder-state-v1';
 let __restoringBuilderState = false;
 function saveBuilderState() {
   if (__restoringBuilderState || !CONFIG?.fields || !hasAllConfigureFields()) return false;
   try {
-    const payload = { version:'0.1.69', savedAt:new Date().toISOString(), values:getConfigValues(), referenceDescription:$('referenceDescription')?.value||'', finalPrompt:$('finalPrompt')?.value||'', presetName:$('presetName')?.value||'' };
+    const payload = { version:'0.1.70', savedAt:new Date().toISOString(), values:getConfigValues(), referenceDescription:$('referenceDescription')?.value||'', finalPrompt:$('finalPrompt')?.value||'', presetName:$('presetName')?.value||'' };
     localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify(payload));
     return true;
   }
@@ -1749,6 +1753,8 @@ function clearPromptBuilderLocalStorage() {
     BUILDER_STATE_KEY,
     BUILDER_STATE_LEGACY_KEY,
     'pb-presets-v1',
+    'pb-user-templates-v6',
+    'pb-user-templates-v5',
     'pb-user-templates-v4',
     'pb-user-templates-v3',
     'pb-prompt-templates-v2',
