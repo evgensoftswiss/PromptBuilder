@@ -163,7 +163,7 @@ function renderTemplateEditorList() {
   if (!list) return;
   const visible = filteredTemplateIndexes();
   $('templatesCount').textContent = `${visible.length} template${visible.length === 1 ? '' : 's'}`;
-  list.innerHTML = visible.length ? visible.map(({item,i}) => `<button type="button" class="template-editor-item ${i === selectedTemplateIndex ? 'active' : ''}" data-template-index="${i}"><strong>${escapeHtml(templateDisplayName(item,i))}</strong><small>${escapeHtml(templateSection(item))} · ${escapeHtml(templateCategory(item))} · ${escapeHtml(item.agent || '')}</small></button>`).join('') : '<div class="template-empty">No templates match.</div>';
+  list.innerHTML = visible.length ? visible.map(({item,i}) => `<button type="button" class="template-editor-item ${i === selectedTemplateIndex ? 'active' : ''}" data-template-index="${i}"><strong>${escapeHtml(templateDisplayName(item,i))}</strong><small>${escapeHtml(templateCategory(item))} · ${escapeHtml(templateSection(item))} · ${escapeHtml(item.agent || '')}</small></button>`).join('') : '<div class="template-empty">No templates match.</div>';
   list.querySelectorAll('.template-editor-item').forEach(btn => btn.addEventListener('click', () => selectTemplate(Number(btn.dataset.templateIndex))));
 }
 function highlightPromptText(text) {
@@ -262,7 +262,7 @@ function populateTemplateEditor(index) {
   const item = PROMPT_TEMPLATES[index]; if (!item) return;
   $('templateEditorEmpty').hidden = true; $('templateEditorForm').hidden = false;
   $('editorTemplateTitle').textContent = templateDisplayName(item,index);
-  $('editorTemplateMeta').textContent = `${templateSection(item)} · ${templateCategory(item)} · ${item.agent || ''}`;
+  $('editorTemplateMeta').textContent = `${templateCategory(item)} · ${templateSection(item)} · ${item.agent || ''}`;
   $('editorTemplateName').value = item.name || templateDisplayName(item,index);
   fillTemplateMetaSelect('editorTemplateSection','section', templateSection(item));
   fillTemplateMetaSelect('editorTemplateCategory','category', templateCategory(item));
@@ -367,7 +367,8 @@ async function addTemplate() {
   };
   PROMPT_TEMPLATES.push(newTemplate);
   selectedTemplateIndex = PROMPT_TEMPLATES.length - 1;
-  await persistUserTemplates();
+  const persisted = await persistUserTemplates();
+  if (!persisted && !(window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local')) console.warn('[Prompt Builder] User template was created but could not be persisted to localStorage.');
   fillTemplateFilter('templateSection','section', filterState.section);
   fillTemplateFilter('templateCategory','category', filterState.category);
   fillTemplateFilter('templateAgent','agent', filterState.agent);
@@ -428,13 +429,17 @@ async function loadTemplates() {
         const r = await fetch('./user_templates.json', { cache: 'no-store' });
         if (r.ok) { const stored = await r.json(); candidates = Array.isArray(stored?.templates) ? stored.templates : []; }
       } else {
-        const raw = localStorage.getItem('pb-user-templates-v4') || localStorage.getItem('pb-user-templates-v3') || localStorage.getItem('pb-prompt-templates-v2') || localStorage.getItem('pb-prompt-templates-v1');
+        const raw = localStorage.getItem(USER_TEMPLATES_STORAGE_KEY) || localStorage.getItem('pb-user-templates-v4') || localStorage.getItem('pb-user-templates-v3') || localStorage.getItem('pb-prompt-templates-v2') || localStorage.getItem('pb-prompt-templates-v1');
         if (raw) { const stored = JSON.parse(raw); candidates = Array.isArray(stored?.templates) ? stored.templates : (Array.isArray(stored) ? stored : []); }
       }
       let nextId = Math.max(BASELINE_TEMPLATE_MAX_ID, ...candidates.map(x => Number(x?.id) || 0));
       for (const rawItem of candidates) {
         const item = normalize(rawItem);
-        const looksLikeBaseline = BASELINE_TEMPLATE_IDS.has(Number(item.id)) || BASELINE_TEMPLATE_SIGNATURES.has(templateSignature(item));
+        // localStorage / user_templates.json contains user templates only.
+        // A user duplicate may intentionally have the same content signature as a builtin,
+        // so never discard a user template by comparing prompt content to baseline signatures.
+        // Only baseline IDs are reserved for immutable source templates.
+        const looksLikeBaseline = BASELINE_TEMPLATE_IDS.has(Number(item.id));
         if (looksLikeBaseline) continue;
         delete item.CanBeDeleted;
         item._source = 'user';
@@ -444,11 +449,9 @@ async function loadTemplates() {
       }
     } catch (_) { userTemplates = []; }
 
-    const dedupe = new Set(baselineTemplates.map(templateSignature));
-    userTemplates = userTemplates.filter(item => {
-      const sig=templateSignature(item);
-      if (dedupe.has(sig)) return false; dedupe.add(sig); return true;
-    });
+    // User templates are intentionally allowed to duplicate builtin content.
+    // They are distinguished by their own IDs/source and must survive reloads.
+    userTemplates = userTemplates.filter(Boolean);
     PROMPT_TEMPLATES = [...baselineTemplates, ...userTemplates.map(item => ({...item, _source:'user'}))];
     if (!(window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local')) persistUserTemplates();
 
@@ -480,12 +483,19 @@ async function persistUserTemplates() {
   const users = PROMPT_TEMPLATES.filter(item => item?._source === 'user').map(item => { const copy = {...item}; delete copy._source; return copy; });
   if (window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local') {
     try {
-      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.66', project:'Prompt Builder', templates:users}) });
+      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.67', project:'Prompt Builder', templates:users}) });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       return true;
     } catch (error) { console.warn('[Prompt Builder] Could not save local user templates:', error); return false; }
   }
-  try { localStorage.setItem('pb-user-templates-v4', JSON.stringify({version:'0.1.66', project:'Prompt Builder', templates:users})); return true; }
+  try {
+    const payload = {version:'0.1.67', project:'Prompt Builder', templates:users};
+    localStorage.setItem(USER_TEMPLATES_STORAGE_KEY, JSON.stringify(payload));
+    // Verify the write so GitHub Pages failures are visible immediately.
+    const verify = localStorage.getItem(USER_TEMPLATES_STORAGE_KEY);
+    if (verify !== JSON.stringify(payload)) throw new Error('localStorage write verification failed');
+    return true;
+  }
   catch(error){ console.warn('[Prompt Builder] Could not save user templates:', error); return false; }
 }
 
@@ -1649,13 +1659,14 @@ $('model').addEventListener('change', () => {
   updateMockModeState();
 });
 
+const USER_TEMPLATES_STORAGE_KEY = 'pb-user-templates-v5';
 const BUILDER_STATE_KEY = 'pb-builder-state-v2';
 const BUILDER_STATE_LEGACY_KEY = 'pb-builder-state-v1';
 let __restoringBuilderState = false;
 function saveBuilderState() {
   if (__restoringBuilderState || !CONFIG?.fields || !hasAllConfigureFields()) return false;
   try {
-    const payload = { version:'0.1.66', savedAt:new Date().toISOString(), values:getConfigValues(), referenceDescription:$('referenceDescription')?.value||'', finalPrompt:$('finalPrompt')?.value||'', presetName:$('presetName')?.value||'' };
+    const payload = { version:'0.1.67', savedAt:new Date().toISOString(), values:getConfigValues(), referenceDescription:$('referenceDescription')?.value||'', finalPrompt:$('finalPrompt')?.value||'', presetName:$('presetName')?.value||'' };
     localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify(payload));
     return true;
   }
