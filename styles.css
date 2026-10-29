@@ -286,3 +286,7 @@ button:focus-visible{outline:2px solid var(--purple2);outline-offset:2px}
 /* AI connection selects: same arrow as other dropdown fields */
 #provider,#model{-webkit-appearance:none;appearance:none;padding-right:38px;cursor:pointer;background-color:#fff;background-image:var(--select-arrow);background-repeat:no-repeat;background-position:right 15px center;background-size:8px 5px}
 #provider:disabled,#model:disabled{cursor:not-allowed}
+
+/* Keep the highlighted <pre> visible under the transparent textarea, also for read-only templates */
+.is-readonly .code-editor{background:#f8fafc}
+.is-readonly .code-editor textarea,.code-editor textarea{background:transparent!important}

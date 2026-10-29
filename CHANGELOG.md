@@ -4,6 +4,9 @@ Version source of truth: `version` in `package.json` (shown in the app header).
 Bump rules: patch (x.y.Z) for fixes, minor (x.Y.0) for features/behavior changes, major for breaking changes.
 Every change set must bump the version and add an entry here.
 
+## 2.0.3
+- Templates: built-in (read-only) templates showed an empty Prompt template field because the read-only background covered the highlighted text; fixed. Asset links now carry a version query to avoid stale browser cache (update it with each release).
+
 ## 2.0.2
 - Builder: Category and AI Tool restored to the previous fixed lists with saveable custom values; Section field removed. The 'Template: ...' line and recommendations match a template by AI Tool and Category keywords. Generation uses the config template again.
 - Settings: Provider and Model dropdowns now show the same arrow as other dropdowns.
