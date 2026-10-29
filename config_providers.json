@@ -239,7 +239,6 @@
   "notes": {
     "mock_mode": "Mock mode changes analysis/generation behavior only. It does not disable provider connection or Vision model loading.",
     "vision_filtering": "Only providers with reliable capability metadata use metadata filtering. Other providers use configurable model-name patterns and exclusions from this file.",
-    "credential_storage": "Provider API keys are stored per provider in the browser localStorage. GitHub Pages has no server-side secret storage in this mode; keys never go into repository files."
-  },
-  "version": "0.1.53"
+    "credential_storage": "Provider API keys are stored per provider as AES-256-GCM ciphertext in this file. The master key lives outside the project folder under the user application-data directory and is migrated from the legacy project-local key when present."
+  }
 }

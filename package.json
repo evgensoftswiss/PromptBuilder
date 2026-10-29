@@ -1,0 +1,9 @@
+﻿{
+  "name": "prompt-builder",
+  "version": "2.0.1",
+  "private": true,
+  "description": "Prompt Builder - static web app for GitHub Pages",
+  "scripts": {
+    "start": "npx --yes http-server . -p 3000 -c-1"
+  }
+}

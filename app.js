@@ -10,536 +10,446 @@ let PROVIDER_ORDER = [];
 let SAVED_CREDENTIALS = {};
 let SAVED_PRESETS = [];
 let PROMPT_TEMPLATES = [];
-let selectedTemplateIndex = -1;
-let BASELINE_TEMPLATE_MAX_ID = 0;
-let BASELINE_TEMPLATE_IDS = new Set();
-let BASELINE_TEMPLATE_SIGNATURES = new Set();
 
 const TEMPLATE_RATING = { Excellent: 5, Good: 4, Average: 3, 'Needs Improvement': 2 };
-function templateStars(value) {
-  const score = TEMPLATE_RATING[String(value)] || 0;
-  return '★'.repeat(score) + '☆'.repeat(Math.max(0, 5 - score));
-}
-function templateValues(key) {
-  const values = uniqueTemplateValues(key);
-  return ['All', ...values];
-}
-
-function templateTaxonomyValues(key) {
-  return uniqueTemplateValues(key);
-}
-
-function refreshBuilderTaxonomy() {
-  if (!CONFIG?.fields || !Array.isArray(PROMPT_TEMPLATES)) return;
-  const ensureTaxonomyFields = [ ['section','Section'], ['category','Category'], ['aiTool','AI Tool'] ];
-  for (const [id,label] of ensureTaxonomyFields) { if (!CONFIG.fields.some(f => f.id === id)) CONFIG.fields.unshift({id,label,type:'select',required:true}); }
-  const sections = templateTaxonomyValues('section');
-  const categories = templateTaxonomyValues('category');
-  const agents = templateTaxonomyValues('agent');
-  const sectionField = CONFIG.fields.find(f => f.id === 'section');
-  const categoryField = CONFIG.fields.find(f => f.id === 'category');
-  const aiToolField = CONFIG.fields.find(f => f.id === 'aiTool');
-  if (sectionField) {
-    sectionField.options = sections.map(value => ({ value, label: value }));
-  }
-  if (categoryField) {
-    categoryField.options = categories.map(value => ({ value, label: value }));
-  }
-  if (aiToolField) {
-    aiToolField.options = agents.map(value => ({ value, label: value }));
-  }
-  const sectionSelect = $('field-section');
-  const categorySelect = $('field-category');
-  const aiToolSelect = $('field-aiTool');
-  const setSelectOptions = (select, values) => {
-    if (!select) return;
-    const current = select.value;
-    select.innerHTML = values.map(value => `<option value="${escapeAttr(value)}">${escapeHtml(value)}</option>`).join('');
-    if (current && values.includes(current)) select.value = current;
-    else if (values.length) select.value = values[0];
-  };
-  setSelectOptions(sectionSelect, sections);
-  setSelectOptions(categorySelect, categories);
-  setSelectOptions(aiToolSelect, agents);
-  if (categorySelect) categorySelect.dispatchEvent(new Event('change', { bubbles: true }));
-  if (aiToolSelect) aiToolSelect.dispatchEvent(new Event('change', { bubbles: true }));
-  updateOpenToolButton();
-}
-function fillTemplateFilter(id, key, preserve = '') {
-  const select = $(id);
-  if (!select) return;
-  const allLabels = { section: 'All sections', category: 'All categories', agent: 'All AI tools' };
-  const values = templateValues(key);
-  select.innerHTML = values.map(value => `<option value="${escapeAttr(value)}">${escapeHtml(value === 'All' ? allLabels[key] : value)}</option>`).join('');
-  select.value = values.includes(preserve) ? preserve : 'All';
-}
-function updateCategoryVisibility() {
-  const categoryField = $('templateCategory')?.closest('label');
-  if (categoryField) {
-    categoryField.hidden = false;
-    categoryField.style.display = '';
-  }
-  return true;
-}
-function templateSection(item) { return String(item.section || '').trim(); }
-function templateCategory(item) { return String(item.category || '').trim(); }
-function filteredTemplateIndexes() {
-  const filters = { section: $('templateSection')?.value || 'All', category: $('templateCategory')?.value || 'All', agent: $('templateAgent')?.value || 'All' };
-  return PROMPT_TEMPLATES.map((item, i) => ({item, i})).filter(({item}) =>
-    Object.entries(filters).every(([key,value]) => value === 'All' || (key === 'section' ? templateSection(item) : key === 'category' ? templateCategory(item) : item[key]) === value)
-  );
-}
-function templateDisplayName(item, index) {
-  return item.name || `${templateCategory(item) || 'Template'} ${index + 1}`;
-}
-function uniqueTemplateValues(key) {
-  return [...new Set(PROMPT_TEMPLATES.map(item => String(key === 'section' ? templateSection(item) : key === 'category' ? templateCategory(item) : (item[key] || '')).trim()).filter(Boolean))];
-}
-function templateChoiceOptions(key, current = '') {
-  const values = uniqueTemplateValues(key);
-  if (current && !values.includes(current)) values.push(current);
-  return values;
-}
-function fillTemplateMetaSelect(id, key, current = '') {
-  const select = $(id);
-  if (!select) return;
-  const values = templateChoiceOptions(key, current);
-  select.innerHTML = '';
-  values.forEach(value => {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = value;
-    select.appendChild(option);
-  });
-  const add = document.createElement('option');
-  add.value = '__ADD_NEW__';
-  add.textContent = '+ Add new value…';
-  select.appendChild(add);
-  select.value = current && values.includes(current) ? current : (values[0] || '');
-}
-function persistConfigToDisk() {
-  try {
-    const snapshot = JSON.parse(JSON.stringify(CONFIG));
-    if (Array.isArray(snapshot?.fields)) snapshot.fields.forEach(field => { if (field.id === 'section' || field.id === 'category' || field.id === 'aiTool') delete field.options; });
-    if (snapshot?.defaults) { delete snapshot.defaults.section; delete snapshot.defaults.category; delete snapshot.defaults.aiTool; }
-    localStorage.setItem('pb-builder-config-v1', JSON.stringify(snapshot));
-    return true;
-  } catch (error) {
-    console.warn('[Prompt Builder] Could not persist Builder configuration locally:', error);
-    return false;
-  }
-}
-
-function syncTemplateTaxonomyToBuilder(key, value) {
-  refreshBuilderTaxonomy();
-  if (key === 'section') { fillTemplateFilter('templateSection', 'section', $('templateSection')?.value || 'All'); }
-  if (key === 'category') fillTemplateFilter('templateCategory', 'category', $('templateCategory')?.value || 'All');
-  if (key === 'agent') fillTemplateFilter('templateAgent', 'agent', $('templateAgent')?.value || 'All');
-  return true;
-}
-function installMetaSelect(id, key) {
-  const select = $(id);
-  if (!select || select.dataset.bound === '1') return;
-  select.dataset.bound = '1';
-  select.addEventListener('change', async () => {
-    if (select.value !== '__ADD_NEW__') { writeTemplateEditorToModel(); return; }
-    const label = key === 'agent' ? 'AI Tool' : key === 'section' ? 'Section' : 'Category';
-    const value = window.prompt(`Enter new ${label}:`);
-    if (!value || !value.trim()) { populateTemplateEditor(selectedTemplateIndex); return; }
-    const clean = value.trim();
-    const item = PROMPT_TEMPLATES[selectedTemplateIndex];
-    if (!item) return;
-    item[key] = clean;
-    
-    fillTemplateMetaSelect(id, key, clean);
-    syncTemplateTaxonomyToBuilder(key, clean);
-    writeTemplateEditorToModel();
-    renderTemplateEditorList();
-    await persistConfigToDisk();
-  });
-}
-function renderTemplateEditorList() {
-  const list = $('templateEditorList');
-  if (!list) return;
-  const visible = filteredTemplateIndexes();
-  $('templatesCount').textContent = `${visible.length} template${visible.length === 1 ? '' : 's'}`;
-  list.innerHTML = visible.length ? visible.map(({item,i}) => `<button type="button" class="template-editor-item ${i === selectedTemplateIndex ? 'active' : ''}" data-template-index="${i}"><strong>${escapeHtml(templateDisplayName(item,i))}</strong><small>${escapeHtml(templateSection(item))} · ${escapeHtml(templateCategory(item))}</small><span>${escapeHtml(item.agent || '')}</span></button>`).join('') : '<div class="template-empty">No templates match.</div>';
-  list.querySelectorAll('.template-editor-item').forEach(btn => btn.addEventListener('click', () => selectTemplate(Number(btn.dataset.templateIndex))));
-}
-function highlightPromptText(text) {
-  let html = escapeHtml(text || '');
-  html = html.replace(/(^|\n)(#{1,6}[^\n]*)/g, '$1<span class="syn-heading">$2</span>');
-  html = html.replace(/(^|\n)(\s*[-*+]\s+[^\n]*)/g, '$1<span class="syn-list">$2</span>');
-  html = html.replace(/(\{\{[^{}]+\}\}|\{[^{}\n]+\})/g, '<span class="syn-var">$1</span>');
-  html = html.replace(/(https?:\/\/[^\s]+)/g, '<span class="syn-link">$1</span>');
-  return html || '<span class="syn-placeholder">Start writing your prompt template…</span>';
-}
-function syncPromptHighlight() {
-  const area = $('editorPromptTemplate');
-  const layer = $('editorPromptHighlight');
-  if (!area || !layer) return;
-  layer.innerHTML = highlightPromptText(area.value);
-  layer.scrollTop = area.scrollTop;
-  layer.scrollLeft = area.scrollLeft;
-}
-function configureVariableMap() {
-  const map = {};
-  if (!Array.isArray(CONFIG?.fields)) return map;
-  const aliases = {
-    aiTool: ['ai tool', 'ai tool / agent', 'agent'],
-    color_palette: ['color palette', 'palette'],
-    dimensions: ['dimensions', 'format'],
-    reference_description: ['reference description', 'description of references', 'references'],
-    hero_subject: ['hero subject', 'hero object']
-  };
-  CONFIG.fields.forEach(field => {
-    const el = field.type === 'palette' ? null : $(`field-${field.id}`);
-    let value = field.type === 'palette' ? (getConfigValues()[field.id] || []) : (el?.value || '');
-    if (Array.isArray(value)) value = value.filter(Boolean).join(', ');
-    const keys = [field.id, field.label, ...(aliases[field.id] || [])].filter(Boolean);
-    keys.forEach(key => {
-      const normalized = String(key).trim();
-      map[normalized] = value;
-      map[normalized.toLowerCase()] = value;
-      map[normalized.toLowerCase().replace(/[._-]/g, ' ')] = value;
-    });
-  });
-  const ref = $('referenceDescription')?.value || '';
-  map.reference_description = ref;
-  map['description of references'] = ref;
-  map.references = ref;
-  return map;
-}
-function templateSignature(item) { return JSON.stringify({section:String(item?.section||'').trim(),category:String(item?.category||'').trim(),agent:String(item?.agent||'').trim(),prompt_template:String(item?.prompt_template||'').trim()}); }
-function isBaselineTemplate(item) {
-  if (!item) return false;
-  if (item._source === 'user') return false;
-  return item._source === 'builtin' || BASELINE_TEMPLATE_IDS.has(Number(item.id)) || BASELINE_TEMPLATE_SIGNATURES.has(templateSignature(item));
-}
-function setTemplateEditorDisabled(readOnly) {
-  const ids = ['editorTemplateName','editorTemplateSection','editorTemplateCategory','editorTemplateAgent','editorTemplateRating','editorPromptTemplate','editorContext','editorEvaluation'];
-  ids.forEach(id => {
-    const el = $(id);
-    if (!el) return;
-    const isText = el.tagName === 'INPUT' || el.tagName === 'TEXTAREA';
-    el.classList.toggle('readonly-field', !!readOnly);
-    el.dataset.readonly = readOnly ? '1' : '0';
-    el.setAttribute('aria-readonly', readOnly ? 'true' : 'false');
-    if (isText) {
-      el.readOnly = !!readOnly;
-      el.disabled = false;
-    } else if (el.tagName === 'SELECT') {
-      // Native <select> has no readonly mode. Keep it visually enabled and
-      // preserve its text value, but block changing/opening it while readonly.
-      el.disabled = false;
-      el.tabIndex = readOnly ? 0 : 0;
-    }
-  });
-  const save=$('templateSaveBtn'); if (save) save.disabled=!!readOnly;
-  const prompt = $('editorPromptTemplate');
-  const highlight = $('editorPromptHighlight');
-  if (prompt && highlight) {
-    prompt.classList.toggle('readonly-prompt', !!readOnly);
-    highlight.style.display = readOnly ? 'none' : '';
-  }
-}
-function updateTemplateDeleteState() {
-  const btn = $('templateDeleteBtn');
-  if (!btn) return;
-  const item = PROMPT_TEMPLATES[selectedTemplateIndex];
-  const canDelete = !!item && !isBaselineTemplate(item);
-  btn.disabled = !canDelete;
-  btn.title = canDelete ? 'Delete this template' : 'This template cannot be deleted';
-}
-function updateEditorRatingStars(value) {
-  const root = $('editorTemplateRatingStars');
-  if (!root) return;
-  const score = TEMPLATE_RATING[String(value)] || 0;
-  root.textContent = '★'.repeat(score) + '☆'.repeat(Math.max(0, 5 - score));
-  root.title = value || '';
-}
-function populateTemplateEditor(index) {
-  const item = PROMPT_TEMPLATES[index]; if (!item) return;
-  $('templateEditorEmpty').hidden = true; $('templateEditorForm').hidden = false;
-  $('editorTemplateTitle').textContent = templateDisplayName(item,index);
-  $('editorTemplateMeta').textContent = `${templateSection(item)} · ${templateCategory(item)} · ${item.agent || ''}`;
-  $('editorTemplateName').value = item.name || templateDisplayName(item,index);
-  fillTemplateMetaSelect('editorTemplateSection','section', templateSection(item));
-  fillTemplateMetaSelect('editorTemplateCategory','category', templateCategory(item));
-  fillTemplateMetaSelect('editorTemplateAgent','agent', item.agent || '');
-  installMetaSelect('editorTemplateSection','section');
-  installMetaSelect('editorTemplateCategory','category');
-  installMetaSelect('editorTemplateAgent','agent');
-  $('editorTemplateRating').value = item.effectiveness_rating || 'Average';
-  updateEditorRatingStars($('editorTemplateRating').value);
-  $('editorPromptTemplate').value = item.prompt_template || '';
-  $('editorContext').value = item.context || '';
-  $('editorEvaluation').value = item.evaluation || '';
-  syncPromptHighlight();
-  setTemplateEditorDisabled(isBaselineTemplate(item));
-  updateTemplateDeleteState();
-  renderTemplateEditorList();
-}
-let persistTemplateTimer = null;
-function queueUserTemplatePersistence() {
-  if (selectedTemplateIndex < 0) return;
-  const item = PROMPT_TEMPLATES[selectedTemplateIndex];
-  if (!item || isBaselineTemplate(item)) return;
-  clearTimeout(persistTemplateTimer);
-  persistTemplateTimer = setTimeout(() => { persistUserTemplates(); }, 120);
-}
-function writeTemplateEditorToModel(options = {}) {
-  if (selectedTemplateIndex < 0 || !PROMPT_TEMPLATES[selectedTemplateIndex]) return;
-  const item = PROMPT_TEMPLATES[selectedTemplateIndex];
-  if (isBaselineTemplate(item)) return;
-  item.name = $('editorTemplateName').value.trim();
-  item.section = $('editorTemplateSection').value.trim();
-  item.category = $('editorTemplateCategory').value.trim();
-  item.agent = $('editorTemplateAgent').value.trim();
-  item.effectiveness_rating = $('editorTemplateRating').value;
-  item.prompt_template = $('editorPromptTemplate').value;
-  item.context = $('editorContext').value;
-  item.evaluation = $('editorEvaluation').value;
-  item.updatedAt = new Date().toISOString();
-  renderTemplateEditorList();
-  const title = $('editorTemplateTitle');
-  if (title) title.textContent = templateDisplayName(item, selectedTemplateIndex);
-  const meta = $('editorTemplateMeta');
-  if (meta) meta.textContent = `${templateSection(item)} · ${templateCategory(item)} · ${item.agent || ''}`;
-  if (!options.skipPersist) queueUserTemplatePersistence();
-}
-
-function alignTemplateFiltersToCurrentTemplate() {
-  if (selectedTemplateIndex < 0) return;
-  const item = PROMPT_TEMPLATES[selectedTemplateIndex];
-  if (!item) return;
-  const mappings = [
-    ['templateSection', templateSection(item) || 'All'],
-    ['templateCategory', templateCategory(item) || 'All'],
-    ['templateAgent', item.agent || 'All']
-  ];
-  let changed = false;
-  mappings.forEach(([id, value]) => {
-    const select = $(id);
-    if (!select || !value || value === 'All') return;
-    const current = select.value || 'All';
-    if (current !== 'All' && current !== value) { select.value = value; changed = true; }
-  });
-  if (changed) { updateCategoryVisibility(); renderTemplateEditorList(); }
-}
-async function saveTemplateFile() {
-  if (selectedTemplateIndex < 0 || isBaselineTemplate(PROMPT_TEMPLATES[selectedTemplateIndex])) { updateTemplateDeleteState(); return; }
-  writeTemplateEditorToModel();
-  const validationErrors = validateUserTemplate(PROMPT_TEMPLATES[selectedTemplateIndex], selectedTemplateIndex);
-  if (validationErrors.length) {
-    const saveStatus = $('editorSaveStatus');
-    if (saveStatus) { saveStatus.textContent = validationErrors.join(' '); saveStatus.style.color = '#b91c1c'; }
-    throw new Error(validationErrors.join(' '));
-  }
-  syncTemplateTaxonomyToBuilder('section', templateSection(PROMPT_TEMPLATES[selectedTemplateIndex] || {}));
-  syncTemplateTaxonomyToBuilder('category', templateCategory(PROMPT_TEMPLATES[selectedTemplateIndex] || {}));
-  syncTemplateTaxonomyToBuilder('agent', PROMPT_TEMPLATES[selectedTemplateIndex]?.agent || '');
-  alignTemplateFiltersToCurrentTemplate();
-  const persisted = await persistUserTemplates();
-  if (!persisted) throw new Error('Could not persist user template');
-  const configSnapshot = JSON.parse(JSON.stringify(CONFIG));
-  if (Array.isArray(configSnapshot?.fields)) configSnapshot.fields.forEach(field => { if (field.id === 'section' || field.id === 'category' || field.id === 'aiTool') delete field.options; });
-  if (configSnapshot?.defaults) { delete configSnapshot.defaults.category; delete configSnapshot.defaults.aiTool; }
-  localStorage.setItem('pb-builder-config-v1', JSON.stringify(configSnapshot));
-  $('editorSaveStatus').textContent = 'Templates saved';
-  $('editorSaveStatus').style.color = '#047857';
-  setTimeout(() => { if ($('editorSaveStatus')) $('editorSaveStatus').textContent = ''; }, 1600);
-  renderTemplateEditorList(); populateTemplateEditor(selectedTemplateIndex);
-}
-function selectTemplate(index) { selectedTemplateIndex = index; populateTemplateEditor(index); }
-function nextTemplateName(section, agent) {
-  const parts = [section, agent].filter(value => value && value !== 'All').map(value => String(value).trim()).filter(Boolean);
-  const prefix = parts.join('-') || 'Template';
-  const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(`^${escapedPrefix}-(\\d+)$`);
-  let maxNumber = 0;
-  PROMPT_TEMPLATES.forEach(item => {
-    const match = String(item.name || '').trim().match(re);
-    if (match) maxNumber = Math.max(maxNumber, Number(match[1]) || 0);
-  });
-  return `${prefix}-${maxNumber + 1}`;
-}
-function nextUserTemplateId() {
-  return Math.max(BASELINE_TEMPLATE_MAX_ID, ...PROMPT_TEMPLATES.map(item => Number(item.id) || 0)) + 1;
-}
-async function addTemplate() {
-  const filterState = {
-    section: $('templateSection')?.value || 'All',
-    category: $('templateCategory')?.value || 'All',
-    agent: $('templateAgent')?.value || 'All'
-  };
-  const selectedSection = filterState.section !== 'All' ? filterState.section : '';
-  const selectedCategory = filterState.category !== 'All' ? filterState.category : '';
-  const selectedAgent = filterState.agent !== 'All' ? filterState.agent : '';
-  const newTemplate = {
-    id: nextUserTemplateId(),
-    _source: 'user',
-    name: nextTemplateName(selectedSection, selectedAgent),
-    section: selectedSection,
-    category: selectedCategory,
-    agent: selectedAgent,
-    prompt_template: 'Create a new production-ready image prompt.\n\nUse the supplied reference description and Configure requirements.',
-    context: '', effectiveness_rating: 'Average', evaluation: '', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
-  };
-  PROMPT_TEMPLATES.push(newTemplate);
-  selectedTemplateIndex = PROMPT_TEMPLATES.length - 1;
-  const persisted = await persistUserTemplates();
-  if (!persisted && !(window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local')) console.warn('[Prompt Builder] User template was created but could not be persisted to localStorage.');
-  fillTemplateFilter('templateSection','section', filterState.section);
-  fillTemplateFilter('templateCategory','category', filterState.category);
-  fillTemplateFilter('templateAgent','agent', filterState.agent);
-  refreshBuilderTaxonomy();
-  updateCategoryVisibility();
-  populateTemplateEditor(selectedTemplateIndex);
-}
-
-async function duplicateTemplate() {
-  if (selectedTemplateIndex < 0) return;
-  const source = PROMPT_TEMPLATES[selectedTemplateIndex];
-  if (!source) return;
-  const copy = JSON.parse(JSON.stringify(source));
-  copy.id = nextUserTemplateId();
-  copy._source = 'user';
-  copy.name = `${templateDisplayName(source, selectedTemplateIndex)} Copy`;
-  copy.createdAt = new Date().toISOString();
-  copy.updatedAt = copy.createdAt;
-  PROMPT_TEMPLATES.splice(selectedTemplateIndex + 1, 0, copy);
-  selectedTemplateIndex += 1;
-  const persisted = await persistUserTemplates();
-  if (!persisted) console.warn('[Prompt Builder] Duplicate template persistence failed.');
-  renderTemplateEditorList();
-  populateTemplateEditor(selectedTemplateIndex);
-  alignTemplateFiltersToCurrentTemplate();
-}
-
-async function deleteTemplate() {
-  if (selectedTemplateIndex < 0) return;
-  if (isBaselineTemplate(PROMPT_TEMPLATES[selectedTemplateIndex])) { updateTemplateDeleteState(); return; }
-  if (!confirm('Delete this template?')) return;
-  const deletedIndex = selectedTemplateIndex;
-  PROMPT_TEMPLATES.splice(deletedIndex, 1);
-  try {
-    await persistUserTemplates();
-  } catch (error) { console.warn('[Prompt Builder] Could not persist deleted template:', error); }
-  const visible = filteredTemplateIndexes();
-  if (visible.length) {
-    const prior = visible.filter(({i}) => i < deletedIndex);
-    selectedTemplateIndex = prior.length ? prior[prior.length - 1].i : visible[visible.length - 1].i;
-  } else {
-    selectedTemplateIndex = -1;
-  }
-  renderTemplateEditorList();
-  if (selectedTemplateIndex >= 0) populateTemplateEditor(selectedTemplateIndex);
-  else { $('templateEditorForm').hidden = true; $('templateEditorEmpty').hidden = false; }
-}
-function renderTemplates() { renderTemplateEditorList(); if (selectedTemplateIndex >= 0 && PROMPT_TEMPLATES[selectedTemplateIndex]) populateTemplateEditor(selectedTemplateIndex); }
-
-async function loadTemplates() {
-  try {
-    const normalize = (item) => {
-      const next = { ...item };
-      const parsedId = Number(next.id);
-      next.id = Number.isFinite(parsedId) && parsedId > 0 ? parsedId : null;
-      next.section = String(next.section || '').trim();
-      next.category = String(next.category || '').trim();
-      next.agent = String(next.agent || '').trim();
-      return next;
-    };
-    const response = await fetch('./prompt_templates.json', { cache: 'no-store' });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const baseline = await response.json();
-    const baselineTemplates = Array.isArray(baseline?.templates) ? baseline.templates.map(normalize) : [];
-    BASELINE_TEMPLATE_MAX_ID = baselineTemplates.reduce((m, item) => Math.max(m, Number(item.id) || 0), 0);
-    baselineTemplates.forEach(item => { item._source = 'builtin'; });
-    BASELINE_TEMPLATE_IDS = new Set(baselineTemplates.map(item => Number(item.id)).filter(Number.isFinite));
-    BASELINE_TEMPLATE_SIGNATURES = new Set(baselineTemplates.map(templateSignature));
-    BASELINE_TEMPLATE_MAX_ID = baselineTemplates.reduce((m, item) => Math.max(m, Number(item.id) || 0), 0);
-    let usedIds = new Set(baselineTemplates.map(item => item.id).filter(Number.isFinite));
-
-    let userTemplates = [];
-    try {
-      const sources = [];
-      const readStorage = (key) => { try { return localStorage.getItem(key); } catch (_) { return null; } };
-      const currentRaw = readStorage(USER_TEMPLATES_STORAGE_KEY);
-      if (currentRaw) sources.push({ raw: currentRaw, key: USER_TEMPLATES_STORAGE_KEY });
-      for (const key of ['pb-user-templates-v5','pb-user-templates-v4','pb-user-templates-v3','pb-prompt-templates-v2','pb-prompt-templates-v1']) {
-        const raw = readStorage(key); if (raw) sources.push({ raw, key });
-      }
-      let candidates = [];
-      let sourceKey = null;
-      for (const source of sources) {
-        try {
-          const stored = JSON.parse(source.raw);
-          const list = Array.isArray(stored?.templates) ? stored.templates : (Array.isArray(stored) ? stored : null);
-          if (Array.isArray(list)) { candidates = list; sourceKey = source.key; break; }
-        } catch (_) {}
-      }
-      let nextId = Math.max(BASELINE_TEMPLATE_MAX_ID, ...candidates.map(x => Number(x?.id) || 0));
-      for (const rawItem of candidates) {
-        const item = normalize(rawItem);
-        if (BASELINE_TEMPLATE_IDS.has(Number(item.id))) continue;
-        delete item.CanBeDeleted;
-        item._source = 'user';
-        if (!Number.isFinite(item.id) || item.id <= BASELINE_TEMPLATE_MAX_ID || usedIds.has(item.id)) item.id = ++nextId;
-        usedIds.add(item.id);
-        userTemplates.push(item);
-      }
-      if (sourceKey && sourceKey !== USER_TEMPLATES_STORAGE_KEY && userTemplates.length) {
-        // Migrate legacy user templates to the dedicated current key.
-        void persistUserTemplates();
-      }
-    } catch (_) { userTemplates = []; }
-
-    userTemplates = userTemplates.filter(Boolean);
-    PROMPT_TEMPLATES = [...baselineTemplates, ...userTemplates.map(item => ({...item, _source:'user'}))];
-
-    fillTemplateFilter('templateSection', 'section');
-    fillTemplateFilter('templateCategory', 'category');
-    fillTemplateFilter('templateAgent', 'agent');
+let selectedTemplateIndex = -1;
+let BASELINE_TEMPLATE_MAX_ID = 0;
+let APP_VERSION_LABEL = '';
+const TEMPLATE_ADD_NEW = '__ADD_NEW__';
+
+function templateStars(value) {
+  const score = TEMPLATE_RATING[String(value)] || 0;
+  return '★'.repeat(score) + '☆'.repeat(Math.max(0, 5 - score));
+}
+function templateKeyValue(item, key) { return String(item?.[key] || '').trim(); }
+function uniqueTemplateValues(key) {
+  return [...new Set(PROMPT_TEMPLATES.map(item => templateKeyValue(item, key)).filter(Boolean))];
+}
+function isUserTemplate(item) { return item?._source === 'user'; }
+function templateDisplayName(item, index) {
+  return item?.name || `${templateKeyValue(item, 'category') || 'Template'} ${index + 1}`;
+}
+function fillTemplateFilter(id, key, preserve = '') {
+  const select = $(id);
+  if (!select) return;
+  const allLabels = { section: 'All sections', category: 'All categories', agent: 'All AI tools' };
+  const values = ['All', ...uniqueTemplateValues(key)];
+  select.innerHTML = values.map(value => `<option value="${escapeAttr(value)}">${escapeHtml(value === 'All' ? allLabels[key] : value)}</option>`).join('');
+  select.value = values.includes(preserve) ? preserve : 'All';
+}
+function refreshTemplateFilters() {
+  fillTemplateFilter('templateSection', 'section', $('templateSection')?.value || 'All');
+  fillTemplateFilter('templateCategory', 'category', $('templateCategory')?.value || 'All');
+  fillTemplateFilter('templateAgent', 'agent', $('templateAgent')?.value || 'All');
+}
+function filteredTemplateIndexes() {
+  const filters = { section: $('templateSection')?.value || 'All', category: $('templateCategory')?.value || 'All', agent: $('templateAgent')?.value || 'All' };
+  return PROMPT_TEMPLATES.map((item, i) => ({ item, i })).filter(({ item }) =>
+    Object.entries(filters).every(([key, value]) => value === 'All' || templateKeyValue(item, key) === value));
+}
+function fillTemplateMetaSelect(id, key, current = '') {
+  const select = $(id);
+  if (!select) return;
+  const values = uniqueTemplateValues(key);
+  if (current && !values.includes(current)) values.push(current);
+  select.innerHTML = values.map(value => `<option value="${escapeAttr(value)}">${escapeHtml(value)}</option>`).join('')
+    + `<option value="${TEMPLATE_ADD_NEW}">+ Add new value…</option>`;
+  select.value = current && values.includes(current) ? current : (values[0] || '');
+}
+function installMetaSelect(id, key) {
+  const select = $(id);
+  if (!select || select.dataset.bound === '1') return;
+  select.dataset.bound = '1';
+  select.addEventListener('change', () => {
+    if (select.value !== TEMPLATE_ADD_NEW) { writeTemplateEditorToModel(); return; }
+    const label = key === 'agent' ? 'AI Tool' : key === 'section' ? 'Section' : 'Category';
+    const value = (window.prompt(`Enter new ${label}:`) || '').trim();
+    const item = PROMPT_TEMPLATES[selectedTemplateIndex];
+    if (!value || !item || !isUserTemplate(item)) { populateTemplateEditor(selectedTemplateIndex); return; }
+    fillTemplateMetaSelect(id, key, value);
+    writeTemplateEditorToModel();
+    refreshTemplateFilters();
+  });
+}
+function renderTemplateEditorList() {
+  const list = $('templateEditorList');
+  if (!list) return;
+  const visible = filteredTemplateIndexes();
+  if ($('templatesCount')) $('templatesCount').textContent = `${visible.length} template${visible.length === 1 ? '' : 's'}`;
+  list.innerHTML = visible.length
+    ? visible.map(({ item, i }) => `<button type="button" class="template-editor-item ${i === selectedTemplateIndex ? 'active' : ''}" data-template-index="${i}"><strong>${escapeHtml(templateDisplayName(item, i))}${isUserTemplate(item) ? '<em class="template-badge">Yours</em>' : ''}</strong><small>${escapeHtml(templateKeyValue(item, 'section'))} · ${escapeHtml(templateKeyValue(item, 'category'))}</small><span>${escapeHtml(templateKeyValue(item, 'agent'))}</span></button>`).join('')
+    : '<div class="template-empty">No templates match.</div>';
+  list.querySelectorAll('.template-editor-item').forEach(btn => btn.addEventListener('click', () => selectTemplate(Number(btn.dataset.templateIndex))));
+}
+function highlightPromptText(text) {
+  let html = escapeHtml(text || '');
+  html = html.replace(/(^|\n)(#{1,6}[^\n]*)/g, '$1<span class="syn-heading">$2</span>');
+  html = html.replace(/(^|\n)(\s*[-*+]\s+[^\n]*)/g, '$1<span class="syn-list">$2</span>');
+  html = html.replace(/(\{\{[^{}]+\}\}|\{[^{}\n]+\})/g, '<span class="syn-var">$1</span>');
+  html = html.replace(/(https?:\/\/[^\s]+)/g, '<span class="syn-link">$1</span>');
+  return html + '\n';
+}
+function syncPromptHighlight() {
+  const area = $('editorPromptTemplate');
+  const layer = $('editorPromptHighlight');
+  if (!area || !layer) return;
+  layer.innerHTML = area.value ? highlightPromptText(area.value) : '<span class="syn-placeholder">Start writing your prompt template…</span>';
+  layer.scrollTop = area.scrollTop;
+  layer.scrollLeft = area.scrollLeft;
+}
+function setTemplateEditorReadOnly(readOnly) {
+  ['editorTemplateName', 'editorPromptTemplate', 'editorContext', 'editorEvaluation'].forEach(id => { const el = $(id); if (el) el.readOnly = !!readOnly; });
+  ['editorTemplateSection', 'editorTemplateCategory', 'editorTemplateAgent', 'editorTemplateRating'].forEach(id => { const el = $(id); if (el) el.disabled = !!readOnly; });
+  if ($('templateSaveBtn')) $('templateSaveBtn').disabled = !!readOnly;
+  $('templateEditorForm')?.classList.toggle('is-readonly', !!readOnly);
+}
+function updateTemplateDeleteState() {
+  const btn = $('templateDeleteBtn');
+  if (!btn) return;
+  const canDelete = isUserTemplate(PROMPT_TEMPLATES[selectedTemplateIndex]);
+  btn.disabled = !canDelete;
+  btn.title = canDelete ? 'Delete this template' : 'Built-in templates cannot be deleted';
+}
+function updateEditorRatingStars(value) {
+  const root = $('editorTemplateRatingStars');
+  if (!root) return;
+  root.textContent = templateStars(value);
+  root.title = value || '';
+}
+function updateEditorHeader(item, index) {
+  $('editorTemplateTitle').textContent = templateDisplayName(item, index);
+  $('editorTemplateMeta').textContent = `${isUserTemplate(item) ? 'User template' : 'Built-in (read-only)'} · ${templateKeyValue(item, 'section')} · ${templateKeyValue(item, 'category')} · ${templateKeyValue(item, 'agent')}`;
+}
+function populateTemplateEditor(index) {
+  const item = PROMPT_TEMPLATES[index];
+  if (!item) return;
+  $('templateEditorEmpty').hidden = true;
+  $('templateEditorForm').hidden = false;
+  updateEditorHeader(item, index);
+  $('editorTemplateName').value = item.name || templateDisplayName(item, index);
+  fillTemplateMetaSelect('editorTemplateSection', 'section', templateKeyValue(item, 'section'));
+  fillTemplateMetaSelect('editorTemplateCategory', 'category', templateKeyValue(item, 'category'));
+  fillTemplateMetaSelect('editorTemplateAgent', 'agent', templateKeyValue(item, 'agent'));
+  installMetaSelect('editorTemplateSection', 'section');
+  installMetaSelect('editorTemplateCategory', 'category');
+  installMetaSelect('editorTemplateAgent', 'agent');
+  $('editorTemplateRating').value = item.effectiveness_rating || 'Average';
+  updateEditorRatingStars($('editorTemplateRating').value);
+  $('editorPromptTemplate').value = item.prompt_template || '';
+  $('editorContext').value = item.context || '';
+  $('editorEvaluation').value = item.evaluation || '';
+  syncPromptHighlight();
+  setTemplateEditorReadOnly(!isUserTemplate(item));
+  updateTemplateDeleteState();
+  renderTemplateEditorList();
+}
+let persistTemplateTimer = null;
+function writeTemplateEditorToModel() {
+  const item = PROMPT_TEMPLATES[selectedTemplateIndex];
+  if (!item || !isUserTemplate(item)) return;
+  item.name = $('editorTemplateName').value.trim();
+  item.section = $('editorTemplateSection').value.trim();
+  item.category = $('editorTemplateCategory').value.trim();
+  item.agent = $('editorTemplateAgent').value.trim();
+  item.effectiveness_rating = $('editorTemplateRating').value;
+  item.prompt_template = $('editorPromptTemplate').value;
+  item.context = $('editorContext').value;
+  item.evaluation = $('editorEvaluation').value;
+  item.updatedAt = new Date().toISOString();
+  renderTemplateEditorList();
+  updateEditorHeader(item, selectedTemplateIndex);
+}
+function setEditorStatus(text, ok) {
+  const el = $('editorSaveStatus');
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = ok ? '#047857' : '#b91c1c';
+  if (ok) setTimeout(() => { if (el.textContent === text) el.textContent = ''; }, 1800);
+}
+function validateUserTemplate(item, index = -1) {
+  const errors = [];
+  const name = String(item?.name || '').trim();
+  if (!name) errors.push('Name is required.');
+  if (!templateKeyValue(item, 'section')) errors.push('Section is required.');
+  if (!templateKeyValue(item, 'category')) errors.push('Category is required.');
+  if (!templateKeyValue(item, 'agent')) errors.push('AI Tool is required.');
+  if (!String(item?.prompt_template || '').trim()) errors.push('Prompt template cannot be empty.');
+  const id = Number(item?.id);
+  if (!Number.isFinite(id) || id <= BASELINE_TEMPLATE_MAX_ID) errors.push('User template must have a valid unique ID.');
+  if (PROMPT_TEMPLATES.some((other, i) => i !== index && Number(other?.id) === id)) errors.push(`Template ID ${id} is already used.`);
+  if (PROMPT_TEMPLATES.some((other, i) => i !== index && String(other?.name || '').trim().toLowerCase() === name.toLowerCase())) errors.push(`Template name "${name}" already exists.`);
+  return errors;
+}
+function orderedUserTemplate(item) {
+  return {
+    id: Number(item?.id) || 0,
+    name: String(item?.name || ''),
+    section: String(item?.section || ''),
+    category: String(item?.category || ''),
+    agent: String(item?.agent || ''),
+    prompt_template: String(item?.prompt_template || ''),
+    context: String(item?.context || ''),
+    effectiveness_rating: String(item?.effectiveness_rating || ''),
+    evaluation: String(item?.evaluation || ''),
+    createdAt: item?.createdAt || null,
+    updatedAt: item?.updatedAt || null
+  };
+}
+async function persistUserTemplates() {
+  const templates = PROMPT_TEMPLATES.filter(isUserTemplate).map(orderedUserTemplate);
+  try {
+    const response = await fetch('./api/user-templates', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ templates }) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     refreshBuilderTaxonomy();
-    updateCategoryVisibility();
-    ['templateSection', 'templateCategory', 'templateAgent'].forEach(id => {
-      const el = $(id);
-      if (el && el.dataset.bound !== '1') {
-        el.dataset.bound = '1';
-        el.addEventListener('change', renderTemplateEditorList);
-      }
-    });
-    renderTemplateEditorList();
-    if (PROMPT_TEMPLATES.length) {
-      const visible = filteredTemplateIndexes();
-      selectedTemplateIndex = visible[0]?.i ?? 0;
-      populateTemplateEditor(selectedTemplateIndex);
-    }
-  } catch (error) {
-    console.error('[Prompt Builder] Could not load prompt templates:', error);
-    if ($('templateEditorList')) $('templateEditorList').innerHTML = '<div class="template-empty">Could not load prompt templates.</div>';
+    return true;
+  } catch (error) {
+    console.warn('[Prompt Builder] Could not save user templates:', error);
+    return false;
+  }
+}
+async function saveTemplateFile() {
+  const item = PROMPT_TEMPLATES[selectedTemplateIndex];
+  if (!item || !isUserTemplate(item)) return;
+  writeTemplateEditorToModel();
+  const errors = validateUserTemplate(item, selectedTemplateIndex);
+  if (errors.length) { setEditorStatus(errors.join(' '), false); return; }
+  if (!await persistUserTemplates()) { setEditorStatus('Could not save the template.', false); return; }
+  refreshTemplateFilters();
+  populateTemplateEditor(selectedTemplateIndex);
+  setEditorStatus('Template saved', true);
+}
+function selectTemplate(index) { selectedTemplateIndex = index; populateTemplateEditor(index); }
+function nextTemplateName(section, agent) {
+  const prefix = [section, agent].filter(Boolean).join('-') || 'Template';
+  const re = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-(\\d+)$`);
+  const max = PROMPT_TEMPLATES.reduce((m, item) => { const match = String(item.name || '').trim().match(re); return match ? Math.max(m, Number(match[1]) || 0) : m; }, 0);
+  return `${prefix}-${max + 1}`;
+}
+function nextUserTemplateId() {
+  return Math.max(BASELINE_TEMPLATE_MAX_ID, ...PROMPT_TEMPLATES.map(item => Number(item.id) || 0)) + 1;
+}
+async function addTemplate() {
+  const pick = id => { const v = $(id)?.value || 'All'; return v === 'All' ? '' : v; };
+  const section = pick('templateSection');
+  const category = pick('templateCategory');
+  const agent = pick('templateAgent');
+  const now = new Date().toISOString();
+  PROMPT_TEMPLATES.push({
+    id: nextUserTemplateId(), _source: 'user', name: nextTemplateName(section, agent), section, category, agent,
+    prompt_template: 'Create a new production-ready image prompt.\n\nUse the supplied reference description and Configure requirements.',
+    context: '', effectiveness_rating: 'Average', evaluation: '', createdAt: now, updatedAt: now
+  });
+  selectedTemplateIndex = PROMPT_TEMPLATES.length - 1;
+  await persistUserTemplates();
+  populateTemplateEditor(selectedTemplateIndex);
+}
+async function duplicateTemplate() {
+  const source = PROMPT_TEMPLATES[selectedTemplateIndex];
+  if (!source) return;
+  const now = new Date().toISOString();
+  const copy = { ...JSON.parse(JSON.stringify(source)), id: nextUserTemplateId(), _source: 'user', createdAt: now, updatedAt: now };
+  copy.name = `${templateDisplayName(source, selectedTemplateIndex)} Copy`;
+  PROMPT_TEMPLATES.splice(selectedTemplateIndex + 1, 0, copy);
+  selectedTemplateIndex += 1;
+  await persistUserTemplates();
+  refreshTemplateFilters();
+  populateTemplateEditor(selectedTemplateIndex);
+}
+async function deleteTemplate() {
+  const item = PROMPT_TEMPLATES[selectedTemplateIndex];
+  if (!item || !isUserTemplate(item) || !confirm('Delete this template?')) return;
+  const deletedIndex = selectedTemplateIndex;
+  PROMPT_TEMPLATES.splice(deletedIndex, 1);
+  await persistUserTemplates();
+  refreshTemplateFilters();
+  const visible = filteredTemplateIndexes();
+  const prior = visible.filter(({ i }) => i < deletedIndex);
+  selectedTemplateIndex = visible.length ? (prior.length ? prior[prior.length - 1].i : visible[visible.length - 1].i) : -1;
+  renderTemplateEditorList();
+  if (selectedTemplateIndex >= 0) populateTemplateEditor(selectedTemplateIndex);
+  else { $('templateEditorForm').hidden = true; $('templateEditorEmpty').hidden = false; }
+}
+function renderTemplates() {
+  renderTemplateEditorList();
+  if (selectedTemplateIndex >= 0 && PROMPT_TEMPLATES[selectedTemplateIndex]) populateTemplateEditor(selectedTemplateIndex);
+}
+async function loadTemplates() {
+  try {
+    const response = await fetch('./prompt_templates.json', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const builtin = (Array.isArray(data.templates) ? data.templates : []).map(item => ({ ...item, _source: 'builtin' }));
+    BASELINE_TEMPLATE_MAX_ID = builtin.reduce((m, item) => Math.max(m, Number(item.id) || 0), 0);
+    let users = [];
+    try {
+      const res = await fetch('./api/user-templates', { cache: 'no-store' });
+      if (res.ok) users = (await res.json()).templates || [];
+    } catch (error) { console.warn('[Prompt Builder] User templates unavailable:', error); }
+    const used = new Set(builtin.map(item => Number(item.id)));
+    let nextId = Math.max(BASELINE_TEMPLATE_MAX_ID, ...users.map(item => Number(item.id) || 0));
+    users = users.map(item => {
+      const next = { ...item, _source: 'user' };
+      if (!Number.isFinite(Number(next.id)) || next.id <= BASELINE_TEMPLATE_MAX_ID || used.has(Number(next.id))) next.id = ++nextId;
+      used.add(Number(next.id));
+      return next;
+    });
+    PROMPT_TEMPLATES = [...builtin, ...users];
+    refreshTemplateFilters();
+    ['templateSection', 'templateCategory', 'templateAgent'].forEach(id => {
+      const el = $(id);
+      if (el && el.dataset.bound !== '1') { el.dataset.bound = '1'; el.addEventListener('change', renderTemplateEditorList); }
+    });
+    selectedTemplateIndex = PROMPT_TEMPLATES.length ? 0 : -1;
+    refreshBuilderTaxonomy();
+    if (selectedTemplateIndex >= 0) populateTemplateEditor(selectedTemplateIndex); else renderTemplateEditorList();
+  } catch (error) {
+    console.error('[Prompt Builder] Could not load prompt templates:', error);
+    if ($('templateEditorList')) $('templateEditorList').innerHTML = '<div class="template-empty">Could not load prompt templates.</div>';
+  }
+}
+
+// Builder Section / Category / AI Tool come from the templates (built-in and user-created).
+const TAXONOMY_FIELDS = { section: 'section', category: 'category', aiTool: 'agent' };
+function refreshBuilderTaxonomy() {
+  if (!Array.isArray(CONFIG?.fields)) return;
+  for (const [fieldId, key] of Object.entries(TAXONOMY_FIELDS)) {
+    const field = CONFIG.fields.find(f => f.id === fieldId);
+    const values = uniqueTemplateValues(key);
+    if (!field || !values.length) continue;
+    field.options = values.map(value => ({ value, label: value }));
+    const select = $(`field-${fieldId}`);
+    if (!select) continue;
+    const current = select.value;
+    const fallback = values.includes(CONFIG.defaults?.[fieldId]) ? CONFIG.defaults[fieldId] : values[0];
+    select.innerHTML = values.map(value => `<option value="${escapeAttr(value)}">${escapeHtml(value)}</option>`).join('');
+    select.value = values.includes(current) ? current : fallback;
   }
+  if (!$('field-section')) return;
+  syncCombos();
+  updateOpenToolButton();
+  try { deriveRecommendation(getConfigValues()); } catch (error) { console.warn('[Prompt Builder] Could not refresh recommendation.', error); }
+}
+function findSelectedTemplateForValues(values) {
+  const section = String(values?.section || '').trim();
+  const category = String(values?.category || '').trim();
+  const agent = String(values?.aiTool || '').trim();
+  // User templates are listed last, so searching from the end lets them override built-in ones.
+  const list = [...PROMPT_TEMPLATES].reverse();
+  const same = (item, key, value) => templateKeyValue(item, key) === value;
+  return list.find(item => same(item, 'section', section) && same(item, 'category', category) && same(item, 'agent', agent))
+    || list.find(item => same(item, 'category', category) && same(item, 'agent', agent))
+    || list.find(item => same(item, 'agent', agent))
+    || null;
+}
+function updateSelectedTemplateInfo(values) {
+  const node = $('selectedTemplateInfo');
+  if (!node) return null;
+  const match = findSelectedTemplateForValues(values || {});
+  node.innerHTML = match
+    ? `Template: <strong>${escapeHtml(templateDisplayName(match, PROMPT_TEMPLATES.indexOf(match)))}</strong> <span class="muted">· ${escapeHtml(templateKeyValue(match, 'section'))} · ${escapeHtml(templateKeyValue(match, 'category'))} · ${escapeHtml(templateKeyValue(match, 'agent'))}</span>`
+    : 'Template: —';
+  return match;
+}
+function setAiSuggestions(style, composition) {
+  const box = $('aiSuggestions');
+  if (!box) return;
+  $('aiSuggestedStyle').textContent = style || '—';
+  $('aiSuggestedComposition').textContent = composition || '—';
+  box.hidden = !(style || composition);
+  box.dataset.style = style || '';
+  box.dataset.composition = composition || '';
+}
+function applyAiSuggestions() {
+  const box = $('aiSuggestions');
+  if (!box) return;
+  const style = box.dataset.style || '';
+  const composition = box.dataset.composition || '';
+  const compositionEl = $('field-composition');
+  if (compositionEl && composition) {
+    const match = [...compositionEl.options].find(o => o.value.toLowerCase() === composition.toLowerCase());
+    if (match) { compositionEl.value = match.value; compositionEl.dispatchEvent(new Event('change', { bubbles: true })); }
+  }
+  // There is no separate Style field, so the suggested style goes into Clarification.
+  const clarification = $('field-clarification');
+  const styleLine = style ? `Style: ${style}` : '';
+  if (clarification && styleLine && !clarification.value.includes(styleLine)) {
+    clarification.value = clarification.value.trim() ? `${clarification.value.trim()}\n${styleLine}` : styleLine;
+    clarification.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  syncCombos();
+  saveBuilderState();
+  box.hidden = true;
 }
 
-async function persistUserTemplates() {
-  const users = PROMPT_TEMPLATES.filter(item => item?._source === 'user').map(orderedUserTemplate);
-  if (window.__PB_LOCAL_SERVER__ || document.body?.dataset?.pbMode === 'local') {
-    try {
-      const response = await fetch('./api/user-templates', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({version:'0.1.73', project:'Prompt Builder', templates:users}) });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return true;
-    } catch (error) { console.warn('[Prompt Builder] Could not save local user templates:', error); return false; }
-  }
-  try {
-    const payload = {version:'0.1.73', project:'Prompt Builder', templates:users};
-    localStorage.setItem(USER_TEMPLATES_STORAGE_KEY, JSON.stringify(payload));
-    // Verify the write so GitHub Pages failures are visible immediately.
-    const verify = localStorage.getItem(USER_TEMPLATES_STORAGE_KEY);
-    if (verify !== JSON.stringify(payload)) throw new Error('localStorage write verification failed');
-    return true;
-  }
-  catch(error){ console.warn('[Prompt Builder] Could not save user templates:', error); return false; }
+function userDataStatus(text, ok = true) {
+  const el = $('userDataStatus');
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = ok ? '#047857' : '#b91c1c';
+}
+function exportUserData() {
+  const customValues = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith('pb-custom-')) customValues[key] = localStorage.getItem(key);
+  }
+  let settings = {};
+  try { settings = JSON.parse(localStorage.getItem('pb-ai-settings') || '{}'); } catch {}
+  let builderState = null;
+  try { builderState = JSON.parse(localStorage.getItem(BUILDER_STATE_KEY) || 'null'); } catch {}
+  const data = {
+    format: 'prompt-builder-user-data',
+    version: APP_VERSION_LABEL,
+    exportedAt: new Date().toISOString(),
+    userTemplates: PROMPT_TEMPLATES.filter(isUserTemplate).map(orderedUserTemplate),
+    presets: SAVED_PRESETS,
+    customValues,
+    builderState,
+    aiSettings: { provider: settings.provider || '', baseUrl: settings.baseUrl || '', model: settings.model || '', models: settings.models || {} }
+  };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'prompt-builder-user-data.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  userDataStatus(`Exported ${data.userTemplates.length} templates and ${data.presets.length} presets.`);
+}
+async function importUserData(file) {
+  const data = JSON.parse(await file.text());
+  if (!data || data.format !== 'prompt-builder-user-data') throw new Error('Invalid Prompt Builder user data file.');
+  const incoming = Array.isArray(data.userTemplates) ? data.userTemplates : [];
+  const existingKeys = new Set(PROMPT_TEMPLATES.filter(isUserTemplate).map(item => `${item.name}|${item.prompt_template}`));
+  let nextId = nextUserTemplateId() - 1;
+  let added = 0;
+  for (const raw of incoming) {
+    if (existingKeys.has(`${raw.name}|${raw.prompt_template}`)) continue;
+    PROMPT_TEMPLATES.push({ ...orderedUserTemplate(raw), id: ++nextId, _source: 'user' });
+    added++;
+  }
+  if (added && !await persistUserTemplates()) throw new Error('Could not save imported templates.');
+  if (Array.isArray(data.presets)) {
+    for (const preset of data.presets.slice(-20)) {
+      if (!preset?.name) continue;
+      await fetch('./api/presets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: preset.name, values: preset.values || {}, referenceDescription: preset.referenceDescription || '', prompt: preset.prompt || '' }) });
+    }
+    await loadPresets();
+  }
+  if (data.customValues && typeof data.customValues === 'object') {
+    for (const [key, value] of Object.entries(data.customValues)) if (key.startsWith('pb-custom-') && typeof value === 'string') localStorage.setItem(key, value);
+  }
+  if (data.builderState) localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify(data.builderState));
+  refreshTemplateFilters();
+  renderTemplates();
+  userDataStatus(`Imported ${added} templates. Reloading…`);
+  setTimeout(() => location.reload(), 600);
+}
+async function loadAppVersion() {
+  try {
+    const data = await (await fetch('./api/status', { cache: 'no-store' })).json();
+    APP_VERSION_LABEL = data.version || '';
+    if ($('appVersion')) $('appVersion').textContent = APP_VERSION_LABEL ? `v${APP_VERSION_LABEL}` : '';
+  } catch {}
 }
 
 function showAiOverlay(message) {
@@ -569,29 +479,19 @@ function showAiErrorOverlay(message) {
 
 
 async function loadConfig() {
-  let loaded = null;
-  try {
-    const raw = localStorage.getItem('pb-builder-config-v1');
-    if (raw) loaded = JSON.parse(raw);
-  } catch (error) {
-    console.warn('[Prompt Builder] Could not read local Builder configuration:', error);
+  // Builder configuration is loaded independently from provider credentials.
+  const configRes = await fetch('./config.json', { cache: 'no-store' });
+  if (!configRes.ok) throw new Error(`Builder configuration HTTP ${configRes.status}`);
+  CONFIG = await configRes.json();
+  if (!CONFIG || !Array.isArray(CONFIG.fields)) {
+    throw new Error('Invalid Builder configuration: fields must be an array.');
   }
-  if (!loaded?.fields) {
-    try {
-      const res = await fetch('./config.json', { cache: 'no-store' });
-      if (!res.ok) throw new Error(`Config HTTP ${res.status}`);
-      loaded = await res.json();
-    } catch (error) {
-      loaded = window.__PROMPT_BUILDER_CONFIG__ || null;
-      if (!loaded) throw error;
-    }
-  }
-  if (!loaded || !Array.isArray(loaded.fields)) throw new Error('Invalid Builder configuration: fields must be an array.');
-  CONFIG = loaded;
   refreshBuilderTaxonomy();
-  mergeCustomDimensions();
+
+  // Configure fields must never depend on provider settings or credentials.
   renderFields();
   setDefaults();
+  $('configPreview').textContent = JSON.stringify(CONFIG, null, 2);
 
   try {
     const providersRes = await fetch('./config_providers.json', { cache: 'no-store' });
@@ -599,83 +499,33 @@ async function loadConfig() {
     const providerConfig = await providersRes.json();
     PROVIDER_ORDER = Array.isArray(providerConfig.providers) ? providerConfig.providers : [];
     PROVIDERS = Object.fromEntries(PROVIDER_ORDER.map(p => [p.id, p]));
-    SAVED_CREDENTIALS = loadStoredCredentialsState();
+
+    try {
+      const credsRes = await fetch('./api/provider-credentials', { cache: 'no-store' });
+      if (credsRes.ok) {
+        const credentialState = await credsRes.json();
+        SAVED_CREDENTIALS = credentialState.providers || {};
+      } else {
+        SAVED_CREDENTIALS = {};
+        console.warn('[Prompt Builder] Provider credential state unavailable.', credsRes.status);
+      }
+    } catch (error) {
+      SAVED_CREDENTIALS = {};
+      console.warn('[Prompt Builder] Could not load provider credential state.', error);
+    }
+
     initProviderSettings(providerConfig.default_provider || PROVIDER_ORDER[0]?.id);
   } catch (error) {
     console.error('[Prompt Builder] Provider setup unavailable; Builder remains usable.', error);
   }
+
+  // Final render guard. If a browser extension or a transient reload touched the DOM, restore the fields.
   requestAnimationFrame(() => {
-    if (!hasAllConfigureFields()) { renderFields(); setDefaults(); }
-  });
-}
-
-function getCustomDimensions() {
-  try {
-    const raw = localStorage.getItem('pb-custom-dimensions-v1');
-    const data = raw ? JSON.parse(raw) : [];
-    return Array.isArray(data) ? data.filter(item => item && item.value && Number(item.width) > 0 && Number(item.height) > 0) : [];
-  } catch (error) {
-    console.warn('[Prompt Builder] Could not read custom dimensions:', error);
-    return [];
-  }
-}
-
-function saveCustomDimensions(items) {
-  try {
-    localStorage.setItem('pb-custom-dimensions-v1', JSON.stringify(items));
-  } catch (error) {
-    console.warn('[Prompt Builder] Could not save custom dimensions:', error);
-  }
-}
-
-function mergeCustomDimensions() {
-  const field = CONFIG?.fields?.find(item => item.id === 'dimensions');
-  if (!field || !Array.isArray(field.options)) return;
-  const base = field.options.filter(item => item.value !== '__ADD_DIMENSION__');
-  const known = new Set(base.map(item => String(item.value)));
-  getCustomDimensions().forEach(item => {
-    if (!known.has(String(item.value))) {
-      base.push({ value: item.value, label: item.label || item.value, width: Number(item.width), height: Number(item.height), custom: true });
+    if (!hasAllConfigureFields()) {
+      renderFields();
+      setDefaults();
     }
   });
-  field.options = base;
-}
-
-function createDimensionOption() {
-  const field = CONFIG?.fields?.find(item => item.id === 'dimensions');
-  if (!field) return;
-  const select = $('field-dimensions');
-  if (!select) return;
-  const current = select.value;
-  const raw = window.prompt('Enter dimensions (for example: 1200 x 628):', '1200 x 628');
-  if (!raw) { select.value = current; return; }
-  const match = String(raw).trim().match(/^(\d{2,5})\s*[xX×]\s*(\d{2,5})$/);
-  if (!match) {
-    alert('Please enter dimensions in the format WIDTH x HEIGHT.');
-    select.value = current;
-    return;
-  }
-  const width = Number(match[1]);
-  const height = Number(match[2]);
-  const orientation = width === height ? 'Square' : (width > height ? 'Landscape' : 'Portrait');
-  const value = `${width} x ${height} (${orientation})`;
-  if (field.options.some(item => item.value === value)) {
-    select.value = value;
-    saveBuilderState();
-    return;
-  }
-  const item = { value, label: value, width, height, custom: true };
-  field.options.push(item);
-  const custom = getCustomDimensions().filter(existing => existing.value !== value);
-  custom.push(item);
-  saveCustomDimensions(custom);
-  persistConfigToDisk();
-  const option = document.createElement('option');
-  option.value = value;
-  option.textContent = value;
-  select.insertBefore(option, select.querySelector('option[value="__ADD_DIMENSION__"]') || null);
-  select.value = value;
-  saveBuilderState();
 }
 
 function renderFields() {
@@ -721,8 +571,10 @@ function renderFields() {
       }
       row.appendChild(swatches); wrap.appendChild(row);
       renderPalette();
+    } else if (field.type === 'textarea') {
+      wrap.appendChild(buildTextarea(field));
     } else {
-      wrap.appendChild(buildSelect(field));
+      wrap.appendChild(buildSelectControl(field));
     }
     root.appendChild(wrap);
   });
@@ -743,27 +595,276 @@ function hasAllConfigureFields() {
 function buildSelect(field) {
   const select = document.createElement('select');
   select.id = `field-${field.id}`;
-  field.options.forEach(o => {
-    const option = document.createElement('option');
-    option.value = o.value;
-    option.textContent = o.label;
-    select.appendChild(option);
-  });
-  if (field.id === 'dimensions') {
-    const add = document.createElement('option');
-    add.value = '__ADD_DIMENSION__';
-    add.textContent = field.addOptionLabel || '+ Add new dimension…';
-    select.appendChild(add);
-  }
+  field.options.forEach(o => { const option = document.createElement('option'); option.value = o.value; option.textContent = o.label; select.appendChild(option); });
+  if (isCustomAllowed(field)) loadCustomValues(field).forEach(item => appendCustomOption(select, item));
   select.addEventListener('change', () => {
-    if (field.id === 'dimensions' && select.value === '__ADD_DIMENSION__') {
-      createDimensionOption();
-      return;
-    }
     saveBuilderState();
-    if (field.id === 'aiTool') updateOpenToolButton();
+    updateCustomRemoveState(select);
+    if (!TAXONOMY_FIELDS[field.id]) return;
+    updateOpenToolButton();
+    try { deriveRecommendation(getConfigValues()); } catch (_) {}
   });
   return select;
+}
+
+function buildTextarea(field) {
+  const area = document.createElement('textarea');
+  area.id = `field-${field.id}`;
+  area.className = 'field-textarea';
+  area.rows = 4;
+  area.placeholder = field.placeholder || '';
+  area.addEventListener('input', saveBuilderState);
+  if (field.allowCustom === false) return area;
+
+  // Saved variants for the textarea: up to maxCustomFor(field), oldest dropped first.
+  const key = customStorageKey(field);
+  const load = () => {
+    try { const list = JSON.parse(localStorage.getItem(key) || '[]'); return (Array.isArray(list) ? list : []).filter(t => typeof t === 'string' && t.trim()).slice(-maxCustomFor(field)); }
+    catch { return []; }
+  };
+  const save = (list) => { try { localStorage.setItem(key, JSON.stringify(list)); } catch (e) { console.warn('[Prompt Builder] Could not save variants.', e); } };
+  const control = document.createElement('div');
+  control.className = 'select-control';
+  control.innerHTML = `<div class="select-row"><select class="saved-variants" aria-label="Saved Clarification variants"></select>
+    <button type="button" class="icon-btn variant-save" title="Save current text as a variant" aria-label="Save current text as a variant">♡</button>
+    <button type="button" class="icon-btn variant-remove" title="Remove selected variant" aria-label="Remove selected variant" disabled>🗑</button></div>
+    <span class="field-hint custom-hint" role="status"></span>`;
+  const select = control.querySelector('.saved-variants');
+  const hint = control.querySelector('.custom-hint');
+  const removeBtn = control.querySelector('.variant-remove');
+  const render = () => {
+    const list = load();
+    select.innerHTML = '<option value="">Saved Clarification variants…</option>';
+    list.forEach((text, i) => {
+      const o = document.createElement('option');
+      o.value = String(i);
+      o.textContent = text.replace(/\s+/g, ' ').slice(0, 60) + (text.length > 60 ? '…' : '');
+      o.title = text;
+      select.appendChild(o);
+    });
+    removeBtn.disabled = true;
+  };
+  render();
+  select.addEventListener('change', () => {
+    const text = load()[Number(select.value)];
+    removeBtn.disabled = select.value === '';
+    if (select.value !== '' && text != null) { area.value = text; saveBuilderState(); }
+  });
+  control.querySelector('.variant-save').addEventListener('click', () => {
+    const text = area.value.trim().slice(0, 1000);
+    if (!text) { hint.textContent = 'Type a Clarification first.'; return; }
+    let list = load();
+    if (list.includes(text)) { hint.textContent = 'Already saved.'; select.value = String(list.indexOf(text)); removeBtn.disabled = false; return; }
+    list.push(text);
+    list = list.slice(-maxCustomFor(field));
+    save(list);
+    render();
+    select.value = String(list.length - 1);
+    removeBtn.disabled = false;
+    hint.textContent = `Saved (max ${maxCustomFor(field)}, oldest is replaced).`;
+  });
+  removeBtn.addEventListener('click', () => {
+    if (select.value === '') return;
+    const list = load();
+    list.splice(Number(select.value), 1);
+    save(list);
+    render();
+    hint.textContent = 'Variant removed.';
+  });
+  const frag = document.createDocumentFragment();
+  frag.append(area, control);
+  return frag;
+}
+
+// Custom values: every select field accepts user-added options, persisted in localStorage per field.
+function parseSize(text) {
+  const m = String(text || '').match(/(\d{2,5})\s*[x×X*]\s*(\d{2,5})/);
+  if (!m) return null;
+  const width = Number(m[1]), height = Number(m[2]);
+  if (width < 64 || height < 64 || width > 8192 || height > 8192) return null;
+  const shape = width === height ? 'Square' : (width > height ? 'Landscape' : 'Portrait');
+  const label = `${width} x ${height} (${shape})`;
+  return { value: label, label, width, height, custom: true };
+}
+function isCustomAllowed(field) {
+  return field.type !== 'palette' && field.type !== 'textarea' && field.allowCustom !== false;
+}
+function customStorageKey(field) {
+  return field.customStorageKey || `pb-custom-${field.id}-v1`;
+}
+function normalizeCustomValue(field, text) {
+  if (field.id === 'dimensions') return parseSize(text);
+  const value = String(text || '').replace(/[\u0000-\u001f<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+  return value ? { value, label: value, custom: true } : null;
+}
+function loadCustomValues(field) {
+  try {
+    const list = JSON.parse(localStorage.getItem(customStorageKey(field)) || '[]');
+    return (Array.isArray(list) ? list : []).map(item => normalizeCustomValue(field, item?.value ?? item)).filter(Boolean).slice(-maxCustomFor(field));
+  } catch { return []; }
+}
+function saveCustomValues(field, select) {
+  const items = Array.from(select.options).filter(o => o.dataset.custom === 'true').map(o => ({ value: o.value }));
+  try { localStorage.setItem(customStorageKey(field), JSON.stringify(items)); }
+  catch (error) { console.warn('[Prompt Builder] Could not save custom values.', error); }
+}
+const DEFAULT_MAX_CUSTOM = 20;
+// Per-field limit of saved custom values (config `maxCustom`); the oldest is dropped when exceeded.
+function maxCustomFor(field) { const n = Number(field?.maxCustom); return Number.isInteger(n) && n > 0 ? n : DEFAULT_MAX_CUSTOM; }
+// Adds a custom option and keeps only the newest maxCustomFor(field) (oldest is dropped).
+function addCustomValue(field, select, item) {
+  appendCustomOption(select, item);
+  const customs = Array.from(select.options).filter(o => o.dataset.custom === 'true');
+  while (customs.length > maxCustomFor(field)) customs.shift().remove();
+  saveCustomValues(field, select);
+}
+function appendCustomOption(select, item) {
+  if (Array.from(select.options).some(o => o.value === item.value)) return;
+  const option = document.createElement('option');
+  option.value = item.value;
+  option.textContent = item.label;
+  option.dataset.custom = 'true';
+  select.appendChild(option);
+}
+function updateCustomRemoveState(select) {
+  const btn = select?.closest('.field')?.querySelector('.custom-remove');
+  if (btn) btn.disabled = select.selectedOptions[0]?.dataset.custom !== 'true';
+}
+function selectedLabel(select) {
+  return select.selectedOptions[0]?.textContent || '';
+}
+function syncCombos() {
+  document.querySelectorAll('#dynamicFields .combo').forEach(combo => {
+    const select = combo.querySelector('select');
+    const input = combo.querySelector('.combo-input');
+    if (select && input && document.activeElement !== input) input.value = selectedLabel(select);
+    updateCustomRemoveState(select);
+  });
+}
+// Searchable combobox: same look/behavior as the Preset field. The hidden <select> stays the source of truth.
+function buildSelectControl(field) {
+  const select = buildSelect(field);
+  const allowCustom = isCustomAllowed(field);
+  const isSize = field.id === 'dimensions';
+  const control = document.createElement('div');
+  control.className = 'select-control';
+  control.innerHTML = `<div class="select-row">
+      <div class="preset-picker combo">
+        <div class="preset-input-wrap"><input type="text" class="combo-input" role="combobox" aria-expanded="false" aria-autocomplete="list" maxlength="${isSize ? 20 : 60}" placeholder="${escapeAttr(isSize ? 'Select or enter size, e.g. 1200 x 628' : `Select or enter ${String(field.label || field.id)}`)}" autocomplete="off" spellcheck="false" /><button type="button" class="preset-toggle combo-toggle" tabindex="-1" aria-label="Show options">▾</button></div>
+        <div class="preset-menu combo-menu" role="listbox" hidden></div>
+      </div>
+      ${allowCustom ? `<button type="button" class="icon-btn custom-toggle" title="Save typed value to the list" aria-label="Save typed value to the list">♡</button>
+      <button type="button" class="icon-btn custom-remove" title="Remove selected custom value" aria-label="Remove selected custom value" disabled>🗑</button>` : ''}
+    </div>
+    <span class="field-hint custom-hint" role="status"></span>`;
+  const combo = control.querySelector('.combo');
+  combo.querySelector('.preset-input-wrap').prepend(select);
+  select.classList.add('combo-select');
+  select.tabIndex = -1;
+  const input = control.querySelector('.combo-input');
+  const menu = control.querySelector('.combo-menu');
+  const hint = control.querySelector('.custom-hint');
+  let active = -1;
+  let items = [];
+
+  const isOpen = () => !menu.hidden;
+  const close = () => { menu.hidden = true; active = -1; input.setAttribute('aria-expanded', 'false'); };
+  const restore = () => { input.value = selectedLabel(select); };
+  const setActive = (i) => {
+    active = i;
+    Array.from(menu.children).forEach((el, idx) => el.classList.toggle('active', idx === i));
+    menu.children[i]?.scrollIntoView({ block: 'nearest' });
+  };
+  const choose = (value) => {
+    select.value = value;
+    input.value = selectedLabel(select);
+    close();
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  const render = (filterText) => {
+    const q = String(filterText || '').trim().toLowerCase();
+    items = Array.from(select.options).filter(o => !q || o.textContent.toLowerCase().includes(q));
+    menu.innerHTML = '';
+    if (!items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'preset-menu-empty';
+      empty.textContent = allowCustom ? 'No matches — press ♡ to save it as a new value' : 'No matches';
+      menu.appendChild(empty);
+    }
+    items.forEach(o => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'preset-menu-item' + (o.value === select.value ? ' selected' : '');
+      btn.setAttribute('role', 'option');
+      btn.dataset.value = o.value;
+      btn.innerHTML = `<span>${escapeHtml(o.textContent)}</span>${o.dataset.custom === 'true' ? '<small>saved</small>' : ''}`;
+      btn.addEventListener('mousedown', e => e.preventDefault());
+      btn.addEventListener('click', () => choose(o.value));
+      menu.appendChild(btn);
+    });
+    menu.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    setActive(items.length && q ? 0 : -1);
+  };
+
+  input.addEventListener('focus', () => { hint.textContent = ''; input.select(); render(''); });
+  input.addEventListener('click', () => { if (!isOpen()) render(''); });
+  input.addEventListener('input', () => { hint.textContent = ''; render(input.value); });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!isOpen()) render(input.value === selectedLabel(select) ? '' : input.value);
+      if (!items.length) return;
+      setActive(e.key === 'ArrowDown' ? (active + 1) % items.length : (active <= 0 ? items.length - 1 : active - 1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const typed = input.value.trim().toLowerCase();
+      const exact = Array.from(select.options).find(o => o.textContent.toLowerCase() === typed || o.value.toLowerCase() === typed);
+      const pick = items[active] || exact;
+      if (pick) choose(pick.value);
+      else if (allowCustom && input.value.trim()) addTyped();
+    } else if (e.key === 'Escape') {
+      if (isOpen()) { e.stopPropagation(); close(); restore(); }
+    }
+  });
+  input.addEventListener('blur', () => { close(); restore(); });
+  combo.querySelector('.combo-toggle').addEventListener('mousedown', e => e.preventDefault());
+  combo.querySelector('.combo-toggle').addEventListener('click', () => {
+    if (isOpen()) { close(); return; }
+    input.focus();
+    render('');
+  });
+
+  function addTyped() {
+    const item = normalizeCustomValue(field, input.value);
+    if (!item) { hint.textContent = isSize ? 'Enter size as width x height (64–8192 px).' : 'Type a value first.'; return; }
+    const existing = Array.from(select.options).find(o => o.value.toLowerCase() === item.value.toLowerCase() || o.textContent.toLowerCase() === item.label.toLowerCase());
+    if (existing) {
+      hint.textContent = 'Already in the list — selected.';
+      choose(existing.value);
+      return;
+    }
+    addCustomValue(field, select, item);
+    hint.textContent = `Saved (max ${maxCustomFor(field)}, oldest is replaced).`;
+    choose(item.value);
+  }
+  if (allowCustom) {
+    const saveBtn = control.querySelector('.custom-toggle');
+    saveBtn.addEventListener('mousedown', e => e.preventDefault());
+    saveBtn.addEventListener('click', addTyped);
+    control.querySelector('.custom-remove').addEventListener('click', () => {
+      const option = select.selectedOptions[0];
+      if (!option || option.dataset.custom !== 'true') return;
+      option.remove();
+      saveCustomValues(field, select);
+      select.selectedIndex = 0;
+      input.value = selectedLabel(select);
+      hint.textContent = 'Custom value removed.';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+  input.value = selectedLabel(select);
+  return control;
 }
 
 function ensureConfigureFields() {
@@ -777,6 +878,7 @@ function ensureConfigureFields() {
 
 function setDefaults() {
   Object.entries(CONFIG.defaults || {}).forEach(([key, value]) => { const el = $(`field-${key}`); if (el) el.value = value; });
+  syncCombos();
   renderPalette();
 }
 
@@ -983,10 +1085,12 @@ function getConfigValues() {
 function buildLocalPrompt(values) {
   const desc = $('referenceDescription').value.trim();
   const paletteColors = Array.isArray(values.palette) ? values.palette : [];
-  const dims = CONFIG.fields.find(f=>f.id==='dimensions').options.find(o=>o.value===values.dimensions && o.value !== '__ADD_DIMENSION__');
+  const dims = parseSize(values.dimensions);
+  const extra = String(values.clarification || '').trim();
   return [
-    `Create a premium ${values.style.toLowerCase()} promotional ${values.category.toLowerCase()} banner for ${values.theme}.`,
-    `Use a ${values.composition.toLowerCase()} composition at ${dims?.width || 1920}x${dims?.height || 700}.`,
+    `Create a premium promotional ${values.category.toLowerCase()} banner for ${values.theme}.`,
+    `Character placement: ${values.composition.toLowerCase()}. Size: ${dims?.width || 1920}x${dims?.height || 700}.`,
+    extra ? `Additional requirements: ${extra}` : '',
     `Build the visual around one dominant focal point with cinematic lighting, depth, restrained supporting elements and generous negative space for copy.`,
     paletteColors.length ? `Use only these selected colors as the color palette: ${paletteColors.join(', ')}.` : '',
     desc ? `Reference direction: ${desc}` : `Reference direction: use the uploaded references as style and composition guidance without copying them.`,
@@ -994,195 +1098,19 @@ function buildLocalPrompt(values) {
   ].join('\n');
 }
 
-
-function findSelectedTemplateForValues(values) {
-  const section = String(values?.section || '').trim();
-  const category = String(values?.category || '').trim();
-  const aiTool = String(values?.aiTool || '').trim();
-  const exact = PROMPT_TEMPLATES.find(item =>
-    templateSection(item) === section &&
-    templateCategory(item) === category &&
-    String(item?.agent || '').trim() === aiTool
-  );
-  if (exact) return exact;
-  const sectionCategory = PROMPT_TEMPLATES.find(item => templateSection(item) === section && templateCategory(item) === category && agentMatchesToolLocal(item.agent, aiTool));
-  if (sectionCategory) return sectionCategory;
-  return PROMPT_TEMPLATES.find(item => agentMatchesToolLocal(item.agent, aiTool)) || null;
-}
-function updateSelectedTemplateInfo(values = getConfigValues()) {
-  const node = $('selectedTemplateInfo');
-  if (!node) return null;
-  const match = findSelectedTemplateForValues(values || {});
-  node.innerHTML = match ? `Template: <strong>${escapeHtml(templateDisplayName(match, PROMPT_TEMPLATES.indexOf(match)))}</strong> <span class="muted">· ${escapeHtml(templateSection(match))} · ${escapeHtml(templateCategory(match))} · ${escapeHtml(match.agent || '')}</span>` : 'Template: —';
-  return match;
-}
-function setAiSuggestions(style, composition) {
-  const box = $('aiSuggestions');
-  if (!box) return;
-  $('aiSuggestedStyle').textContent = style || '—';
-  $('aiSuggestedComposition').textContent = composition || '—';
-  box.hidden = !(style || composition);
-  box.dataset.style = style || '';
-  box.dataset.composition = composition || '';
-}
-function applyAiSuggestions() {
-  const box = $('aiSuggestions');
-  if (!box) return;
-  const style = box.dataset.style || '';
-  const composition = box.dataset.composition || '';
-  const styleEl = $('field-style');
-  const compositionEl = $('field-composition');
-  if (styleEl && style && [...styleEl.options].some(o => o.value === style)) styleEl.value = style;
-  if (compositionEl && composition && [...compositionEl.options].some(o => o.value === composition)) compositionEl.value = composition;
-  saveBuilderState();
-  box.hidden = true;
-}
-function validateUserTemplate(item, index = -1) {
-  const errors = [];
-  const name = String(item?.name || '').trim();
-  const section = String(item?.section || '').trim();
-  const category = String(item?.category || '').trim();
-  const agent = String(item?.agent || '').trim();
-  const prompt = String(item?.prompt_template || '').trim();
-  if (!name) errors.push('Name is required.');
-  if (!section) errors.push('Section is required.');
-  if (!category) errors.push('Category is required.');
-  if (!agent) errors.push('AI Tool is required.');
-  if (!prompt) errors.push('Prompt template cannot be empty.');
-  const id = Number(item?.id);
-  if (!Number.isFinite(id) || id <= BASELINE_TEMPLATE_MAX_ID) errors.push('User template must have a valid unique ID.');
-  const duplicateId = PROMPT_TEMPLATES.some((other, i) => i !== index && Number(other?.id) === id);
-  if (duplicateId) errors.push(`Template ID ${id} is already used.`);
-  const duplicateName = PROMPT_TEMPLATES.some((other, i) => i !== index && String(other?.name || '').trim().toLowerCase() === name.toLowerCase());
-  if (duplicateName) errors.push(`Template name "${name}" already exists.`);
-  return errors;
-}
-function orderedUserTemplate(item) {
-  return {
-    id: Number(item?.id) || 0,
-    name: String(item?.name || ''),
-    section: String(item?.section || ''),
-    category: String(item?.category || ''),
-    agent: String(item?.agent || ''),
-    prompt_template: String(item?.prompt_template || ''),
-    context: String(item?.context || ''),
-    effectiveness_rating: String(item?.effectiveness_rating || ''),
-    evaluation: String(item?.evaluation || ''),
-    createdAt: item?.createdAt || null,
-    updatedAt: item?.updatedAt || null
-  };
-}
-function orderedPreset(item) {
-  return {
-    name: String(item?.name || ''),
-    values: item?.values && typeof item.values === 'object' ? item.values : {},
-    referenceDescription: String(item?.referenceDescription || ''),
-    createdAt: item?.createdAt || null,
-    updatedAt: item?.updatedAt || null
-  };
-}
-function exportUserData() {
-  console.info('[Prompt Builder] Export includes user presets:', Array.isArray(SAVED_PRESETS) ? SAVED_PRESETS.length : 0);
-  const users = PROMPT_TEMPLATES
-    .filter(item => item?._source === 'user')
-    .map(orderedUserTemplate);
-  const settings = JSON.parse(localStorage.getItem('pb-ai-settings') || '{}');
-  const builderRaw = localStorage.getItem(BUILDER_STATE_KEY) || '';
-  const builderState = builderRaw ? JSON.parse(builderRaw) : null;
-  const stateValues = builderState?.values && typeof builderState.values === 'object' ? builderState.values : {};
-  const orderedBuilderValues = {
-    category: String(stateValues.category || ''),
-    section: String(stateValues.section || ''),
-    aiTool: String(stateValues.aiTool || ''),
-    style: String(stateValues.style || ''),
-    theme: String(stateValues.theme || ''),
-    composition: String(stateValues.composition || ''),
-    palette: Array.isArray(stateValues.palette) ? stateValues.palette.slice(0, 10) : [],
-    dimensions: String(stateValues.dimensions || '')
-  };
-  const data = {
-    format: 'prompt-builder-user-data',
-    version: '0.1.73',
-    exportedAt: new Date().toISOString(),
-    userTemplates: users,
-    presets: (Array.isArray(SAVED_PRESETS) ? SAVED_PRESETS : []).map(orderedPreset),
-    customDimensions: getCustomDimensions(),
-    builderState: builderState ? {
-      version: '0.1.73',
-      savedAt: builderState.savedAt || null,
-      values: orderedBuilderValues,
-      referenceDescription: String(builderState.referenceDescription || ''),
-      finalPrompt: String(builderState.finalPrompt || ''),
-      presetName: String(builderState.presetName || '')
-    } : null,
-    aiSettings: {
-      provider: settings.provider || '',
-      baseUrl: settings.baseUrl || '',
-      model: settings.model || '',
-      models: settings.models && typeof settings.models === 'object' ? settings.models : {}
-    }
-  };
-  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download='prompt-builder-user-data.json';
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-async function importUserData(file) {
-  console.info('[Prompt Builder] Importing user presets when present in export.');
-  const text = await file.text();
-  const data = JSON.parse(text);
-  if (!data || data.format !== 'prompt-builder-user-data') throw new Error('Invalid Prompt Builder user data file.');
-  const incoming = Array.isArray(data.userTemplates) ? data.userTemplates : [];
-  const maxId = Math.max(BASELINE_TEMPLATE_MAX_ID, ...PROMPT_TEMPLATES.map(item => Number(item.id) || 0), ...incoming.map(item => Number(item.id) || 0));
-  let nextId = maxId;
-  const existingIds = new Set(PROMPT_TEMPLATES.map(item => Number(item.id)));
-  const importedUsers = incoming.map(item => {
-    const copy = {...item, _source:'user'};
-    let id = Number(copy.id);
-    if (!Number.isFinite(id) || id <= BASELINE_TEMPLATE_MAX_ID || existingIds.has(id)) id = ++nextId;
-    copy.id = id; existingIds.add(id); return copy;
-  });
-  PROMPT_TEMPLATES = [...PROMPT_TEMPLATES.filter(item => item?._source === 'builtin'), ...PROMPT_TEMPLATES.filter(item => item?._source === 'user'), ...importedUsers];
-  // Remove exact user duplicates after import.
-  const seen = new Set();
-  PROMPT_TEMPLATES = PROMPT_TEMPLATES.filter(item => {
-    if (item._source !== 'user') return true;
-    const key = `${item.id}|${item.name}|${item.prompt_template}`;
-    if (seen.has(key)) return false; seen.add(key); return true;
-  });
-  if (Array.isArray(data.presets)) {
-    SAVED_PRESETS = data.presets.slice(-20).map(orderedPreset);
-  }
-  savePresetsToStorage();
-  if (Array.isArray(data.customDimensions)) saveCustomDimensions(data.customDimensions);
-  if (data.builderState) localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify(data.builderState));
-  if (data.aiSettings) localStorage.setItem('pb-ai-settings', JSON.stringify({...JSON.parse(localStorage.getItem('pb-ai-settings') || '{}'), ...data.aiSettings}));
-  const saved = await persistUserTemplates();
-  if (!saved) throw new Error('Could not persist imported user templates.');
-  renderPresetOptions();
-  mergeCustomDimensions();
-  refreshBuilderTaxonomy();
-  renderTemplates();
-  restoreBuilderState();
-}
-
 function deriveRecommendation(values) {
   const meta = findSelectedTemplateForValues(values || {}) || {};
-  const effectiveness = meta.effectiveness_rating || meta.effectiveness_label || 'Not evaluated';
-  const validation = meta.validation_status || 'Validated';
-  const starMap = { 'Excellent':'★★★★★', 'Good':'★★★★☆', 'Average':'★★★☆☆', 'Needs Improvement':'★★☆☆☆', 'Very effective':'★★★★★', 'Effective':'★★★★☆', 'Moderately effective':'★★★☆☆', 'Limited / needs improvement':'★★☆☆☆' };
+  const effectiveness = meta.effectiveness_rating || 'Not evaluated';
+  const validation = meta.id ? 'Validated' : 'Not evaluated';
+  const starMap = { 'Excellent': '★★★★★', 'Good': '★★★★☆', 'Average': '★★★☆☆', 'Needs Improvement': '★★☆☆☆' };
   $('ratingStars').textContent = starMap[effectiveness] || '☆☆☆☆☆';
   $('ratingStars').title = effectiveness;
-  $('ratingScore').textContent = meta.prompt_type || '';
+  $('ratingScore').textContent = meta.id ? effectiveness : '';
   $('validationBadge').textContent = validation;
   $('validationBadge').className = `badge ${validation === 'Validated' ? 'green' : 'gray'}`;
-  $('bestFor').textContent = meta.best_for || meta.context || 'No source-backed recommendation available.';
-  const chips = [meta.agent, meta.prompt_type, meta.graphic_type].filter(Boolean);
-  $('recommendations').innerHTML = chips.map(x=>`<span class="chip">${escapeHtml(x)}</span>`).join('');
+  $('bestFor').textContent = meta.context || 'No source-backed recommendation available.';
+  const chips = [meta.agent, meta.section, meta.category].filter(Boolean);
+  $('recommendations').innerHTML = [...new Set(chips)].map(x=>`<span class="chip">${escapeHtml(x)}</span>`).join('');
   $('limitations').textContent = meta.evaluation || 'No source-backed limitation recorded.';
   updateSelectedTemplateInfo(values);
 }
@@ -1200,11 +1128,10 @@ function generateMockAnalysis() {
 }
 
 function getSettings() {
-  const providerId = $('provider').value;
   return {
-    provider: providerId,
+    provider: $('provider').value,
     baseUrl: $('baseUrl').value.trim(),
-    apiKey: $('apiKey').value.trim() || getStoredProviderApiKey(providerId),
+    apiKey: $('apiKey').value.trim(),
     model: $('model').value,
     mockMode: $('mockMode').checked
   };
@@ -1287,38 +1214,6 @@ function setReferencePalette(colors) {
   renderPalette();
 }
 
-
-async function callOpenAICompatibleBrowser(settings, messages) {
-  const prepared = messages.map(message => {
-    if (!Array.isArray(message.content)) return message;
-    return {...message, content: message.content.map(part => part.type === 'image_url' ? {...part, image_url:{...part.image_url, ...(settings.provider==='openai'?{detail:'high'}:{})}} : part)};
-  });
-  const data = await fetchProviderJson(`${settings.baseUrl.replace(/\/$/,'')}/chat/completions`, {method:'POST',headers:{'Content-Type':'application/json',...buildProviderFetchOptions(PROVIDERS[settings.provider],settings.apiKey).headers},body:JSON.stringify({model:settings.model,messages:prepared,temperature:0.4})});
-  return data?.choices?.[0]?.message?.content || '';
-}
-async function callGoogleBrowser(settings, messages) {
-  const contents = messages.map(message => ({role:message.role==='assistant'?'model':'user',parts:Array.isArray(message.content)?message.content.map(p=>{
-    if(p.type==='text') return {text:p.text};
-    const m=String(p.image_url.url).match(/^data:(image\/[\\w.+-]+);base64,(.+)$/);
-    return m ? {inlineData:{mimeType:m[1],data:m[2]}} : {text:String(p.image_url.url)};
-  }):[{text:message.content}]}));
-  const root=settings.baseUrl.replace(/\/$/,'');
-  const data=await fetchProviderJson(`${root}/models/${encodeURIComponent(settings.model)}:generateContent?key=${encodeURIComponent(settings.apiKey)}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents,generationConfig:{temperature:0.4}})});
-  return data?.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'';
-}
-async function callOllamaBrowser(settings, messages) {
-  const normalized=messages.map(message=>{if(!Array.isArray(message.content))return message;const textParts=message.content.filter(p=>p.type==='text').map(p=>p.text).join('\n');const images=message.content.filter(p=>p.type==='image_url').map(p=>String(p.image_url.url).replace(/^data:image\/[^;]+;base64,/,'')).filter(Boolean);return {role:message.role,content:textParts,...(images.length?{images}:{})};});
-  const root=settings.baseUrl.replace(/\/$/,'');
-  const data=await fetchProviderJson(`${root}/api/chat`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:settings.model,messages:normalized,stream:false})});
-  return data?.message?.content||'';
-}
-async function callVisionBrowser(settings,messages){
-  if(settings.provider==='google') return callGoogleBrowser(settings,messages);
-  if(settings.provider==='ollama') return callOllamaBrowser(settings,messages);
-  return callOpenAICompatibleBrowser(settings,messages);
-}
-function parseAiJson(raw){const cleaned=String(raw||'').replace(/^```json\s*|\s*```$/g,'').trim();try{return JSON.parse(cleaned);}catch{return {description:cleaned,palette:[]};}}
-
 async function analyzeReferences() {
   if (!refs.length) {
     $('referenceDescription').value = 'No references were supplied.';
@@ -1338,36 +1233,30 @@ async function analyzeReferences() {
   const instruction = 'Analyze only the attached reference image(s), using visible image content as the sole source of truth. Return ONLY characteristics supported by the references. If multiple images are attached, describe ONLY characteristics they have in common and ignore one-off details. Identify the common visual style, recurring subject/object types, composition and placement, framing, lighting, materials, textures, perspective, atmosphere and depth. Also extract a representative color palette of no more than 8 HEX colors. For multiple references, include only colors or very close color families that are genuinely common across the reference set; for one reference, return its dominant representative colors. Do not use or infer any Builder settings. Do not invent unsupported details. Do not generate a final image prompt.';
   console.log('[Prompt Builder] Reference analysis instruction sent to AI:\n' + instruction);
   console.log('[Prompt Builder] Reference images sent: ' + images.length);
-  console.log('[Prompt Builder] Reference analysis request:', {settings:{provider:settings.provider,baseUrl:settings.baseUrl,model:settings.model}, instruction, imageCount:images.length});
-  const raw = await callVisionBrowser(settings,[{role:'system',content:'You are Prompt Builder\'s visual reference analyst. Analyze ONLY the attached image(s). Builder configuration is not provided and must not be used. Return valid JSON with exactly three fields: description (string), palette (array of 1 to 8 uppercase HEX colors), and suggestions (object with style and composition strings).',},{role:'user',content:[{type:'text',text:instruction},...images.map(url=>({type:'image_url',image_url:{url}}))]}]);
-  const data = parseAiJson(raw);
+  const compositionOptions = Array.from($('field-composition')?.options || []).map(o => o.value);
+  const res = await fetch('./api/analyze', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({settings, images, instruction, compositionOptions}) });
+  if (!res.ok) { const t = await res.text(); throw new Error(t); }
+  const data = await res.json();
   $('referenceDescription').value = data.description || '';
+  setAiSuggestions(String(data?.suggestions?.style || ''), String(data?.suggestions?.composition || ''));
   const aiPalette = Array.isArray(data.palette) ? data.palette.slice(0, 8) : [];
   setReferencePalette(aiPalette);
-  setAiSuggestions(String(data?.suggestions?.style || ''), String(data?.suggestions?.composition || ''));
   console.log('[Prompt Builder] Palette returned by AI:', aiPalette);
   $('statusBadge').textContent = 'Analyzed';
   currentResult = { referenceDescription: data.description || '', palette: getPaletteColors() };
   return data.description || '';
 }
 
-function agentMatchesToolLocal(agent, aiTool){ const a=String(agent||'').toLowerCase(); const t=String(aiTool||'').toLowerCase(); if(!a||!t)return false; if(t.includes('chatgpt'))return a.includes('chatgpt')||a.includes('codex'); if(t.includes('figma'))return a.includes('figma'); if(t.includes('magnific'))return a.includes('magnific'); return a.includes(t); }
-
 async function generateFinalWithAI(referenceDescription) {
   const settings = getSettings();
   if (!settings.model) throw new Error('Connect the provider and choose a Vision model first.');
   const values = getConfigValues();
-  const aiTool = String(values?.aiTool || '').trim();
-  const storedTemplates = PROMPT_TEMPLATES || [];
-  const match = findSelectedTemplateForValues(values) || storedTemplates.find(t => agentMatchesToolLocal(t.agent, aiTool)) || storedTemplates.find(t => String(t.agent||'').trim()===aiTool);
-  const template = String(match?.prompt_template || '').trim();
-  if (!template) throw new Error(`No prompt template configured for AI Tool: ${aiTool || 'Unknown'}`);
-  const configLines = Object.entries(values || {}).map(([key,value]) => `${key}: ${Array.isArray(value)?value.filter(Boolean).join(', '): (value ?? '')}`).join('\n');
-  const system = `You are Prompt Builder's final image-prompt generator. Use the selected AI Tool template as the required output structure. Fill and adapt it using the supplied Builder configuration and Description of references. Preserve the template structure. Configure values are explicit user requirements and have priority over reference guidance. Apply the validated Prompt Builder principles: clear objective, strong visual hierarchy, one dominant focal point when compatible, concrete subject placement, controlled lighting/material/texture direction, useful negative constraints, restrained supporting elements, clear negative space, avoid clutter/overlap/duplication, and never copy unique artwork, exact text, logos, or unrelated details from references. Return only the completed prompt in English.`;
-  const user = `AI TOOL: ${aiTool}\n\nPROMPT TEMPLATE\n${template}\n\nBUILDER CONFIGURATION\n${configLines || 'No configuration values provided.'}\n\nDESCRIPTION OF REFERENCES\n${referenceDescription || 'No reference description provided.'}\n\nComplete the template now. Output only the final ready-to-use image-generation prompt.`;
-  console.log('[Prompt Builder] Final prompt generation request:', {provider:settings.provider,baseUrl:settings.baseUrl,model:settings.model,aiTool,template,systemPrompt:system,userPrompt:user});
-  const raw = await callVisionBrowser(settings,[{role:'system',content:system},{role:'user',content:user}]);
-  const data = {prompt:String(raw||'').trim(), debug:{aiTool,template,systemPrompt:system,userPrompt:user}, metadata:match||null};
+  const res = await fetch('./api/generate', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({settings, values, referenceDescription, template: findSelectedTemplateForValues(values)?.prompt_template || ''})
+  });
+  if (!res.ok) { const t = await res.text(); throw new Error(t); }
+  const data = await res.json();
   if (data.debug) {
     console.log('[Prompt Builder] Final prompt request sent to AI:', data.debug);
   }
@@ -1485,7 +1374,6 @@ function resetModelSelect() {
 function initProviderSettings(defaultProviderId) {
   renderProviderOptions();
   const saved = JSON.parse(localStorage.getItem('pb-ai-settings') || '{}');
-  SAVED_CREDENTIALS = loadStoredCredentialsState();
   const initialProvider = saved.provider && PROVIDERS[saved.provider]
     ? saved.provider
     : (PROVIDERS[defaultProviderId] ? defaultProviderId : PROVIDER_ORDER[0]?.id);
@@ -1546,106 +1434,50 @@ function persistSettings() {
   localStorage.setItem('pb-ai-settings', JSON.stringify({ provider: $('provider').value, baseUrl: $('baseUrl').value.trim(), model: $('model').value, models }));
 }
 
-function loadStoredCredentialsState() {
-  try {
-    const raw = localStorage.getItem('pb-provider-credentials-v1');
-    const data = raw ? JSON.parse(raw) : {};
-    return Object.fromEntries(Object.entries(data).map(([id, value]) => [id, {has_saved_key: !!value?.apiKey, required: !!PROVIDERS[id]?.api_key?.required}]));
-  } catch { return {}; }
-}
-function getStoredProviderApiKey(providerId) {
-  try {
-    const data = JSON.parse(localStorage.getItem('pb-provider-credentials-v1') || '{}');
-    return String(data?.[providerId]?.apiKey || '');
-  } catch { return ''; }
-}
-function saveStoredProviderApiKey(providerId, apiKey) {
-  const data = JSON.parse(localStorage.getItem('pb-provider-credentials-v1') || '{}');
-  data[providerId] = {apiKey};
-  localStorage.setItem('pb-provider-credentials-v1', JSON.stringify(data));
-  SAVED_CREDENTIALS[providerId] = {has_saved_key: !!apiKey, required: !!PROVIDERS[providerId]?.api_key?.required};
-}
-function saveProviderCredential(apiKey) {
+async function saveProviderCredential(apiKey) {
   const provider = PROVIDERS[$('provider').value];
   if (!provider?.api_key?.required) return;
   const value = String(apiKey || '').trim();
   if (!value) return;
-  saveStoredProviderApiKey(provider.id, value);
+  const r = await fetch('./api/provider-credentials', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({provider: $('provider').value, apiKey:value})
+  });
+  const data = await r.json();
+  if (!r.ok || !data.ok) throw new Error(data.error || 'Failed to save API key');
+  SAVED_CREDENTIALS[$('provider').value] = { has_saved_key:true, required:true };
   $('apiKey').dataset.saved = 'true';
   $('apiKey').value = '';
-  $('apiKey').placeholder = 'Saved locally · enter a new key to replace';
+  $('apiKey').placeholder = 'Saved securely · enter a new key to replace';
   updateMockModeState();
 }
 
-function buildProviderFetchOptions(provider, apiKey) {
-  return apiKey ? {headers:{Authorization:`Bearer ${apiKey}`}} : {};
-}
-async function fetchProviderJson(url, options = {}) {
-  let response;
-  try { response = await fetch(url, options); }
-  catch (error) { throw new Error(`Network/CORS error: ${error.message}. The provider must allow browser requests from this site.`); }
-  const text = await response.text();
-  let data = {};
-  try { data = JSON.parse(text); } catch { data = {raw:text}; }
-  if (!response.ok) {
-    const message = data?.error?.message || data?.error || data?.message || text || `HTTP ${response.status}`;
-    throw new Error(message);
-  }
-  return data;
-}
-function modelIsVision(model, provider) {
-  const cfg = provider?.models || {};
-  const id = String(model.id || model.name || '').toLowerCase();
-  const text = `${id} ${JSON.stringify(model).toLowerCase()}`;
-  if ((cfg.exclude_patterns || []).some(p => text.includes(String(p).toLowerCase()))) return false;
-  if (cfg.vision_detection === 'input_modalities') {
-    const modalities = model?.architecture?.input_modalities || model?.input_modalities || model?.modalities?.input || [];
-    return Array.isArray(modalities) && modalities.some(x => String(x).toLowerCase() === 'image');
-  }
-  if (cfg.vision_detection === 'capabilities_object') return model?.capabilities?.vision === true;
-  if (cfg.vision_detection === 'capabilities') return model.vision === true || (Array.isArray(model.capabilities) && model.capabilities.includes('vision'));
-  const patterns = cfg.vision_patterns || [];
-  return patterns.length ? patterns.some(p => id.includes(String(p).toLowerCase())) : false;
-}
-async function loadVisionModelsDirect(provider, apiKey, baseUrl) {
-  const root = String(baseUrl || provider.base_url || '').replace(/\/$/, '');
-  if (provider.id === 'ollama') {
-    const tags = await fetchProviderJson(`${root}/api/tags`);
-    const models = [];
-    for (const m of (tags.models || [])) {
-      try {
-        const detail = await fetchProviderJson(`${root}/api/show`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:m.name || m.model})});
-        if ((detail.capabilities || []).includes('vision')) models.push({id:m.name || m.model,name:m.name || m.model,vision:true});
-      } catch {}
-    }
-    return models;
-  }
-  if (provider.id === 'google') {
-    const data = await fetchProviderJson(`${root}/models?key=${encodeURIComponent(apiKey)}`);
-    return (data.models || []).filter(m => (m.supportedGenerationMethods || []).includes('generateContent') && modelIsVision(m, provider)).map(m => ({id:String(m.name).replace(/^models\//,''),name:m.displayName || m.name,vision:true}));
-  }
-  const data = await fetchProviderJson(`${root}/models`, buildProviderFetchOptions(provider, apiKey));
-  return (data.data || []).filter(m => modelIsVision(m, provider)).map(m => ({id:m.id,name:m.id,vision:true}));
-}
 async function loadProviderModels({showError=false} = {}) {
   const provider = PROVIDERS[$('provider').value];
   if (!provider) return;
   const typedApiKey = $('apiKey').value.trim();
-  const apiKey = typedApiKey || getStoredProviderApiKey(provider.id);
-  if (provider.api_key?.required && !apiKey) {
-    $('connectionStatus').textContent = 'API key required';
-    renderApiKeyHelp({forceVisible:true});
-    if (showError) showConnectionError(`${provider.label}: API key is required.`);
+  const hasSavedKey = !!SAVED_CREDENTIALS[provider.id]?.has_saved_key;
+  const apiKey = typedApiKey || '';
+  if (provider.api_key?.required && !apiKey && !hasSavedKey) {
+    if (showError) showConnectionError('Enter an API key first.');
     return;
   }
+
   try {
     $('testConnectionBtn').disabled = true;
     $('connectionStatus').textContent = 'Connecting and loading Vision models...';
-    providerModels = await loadVisionModelsDirect(provider, apiKey, $('baseUrl').value.trim());
+    const r = await fetch('./api/models', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({provider:$('provider').value, baseUrl:$('baseUrl').value.trim(), apiKey})
+    });
+    const data = await r.json();
+    if (!r.ok || !data.ok) throw new Error(data.error || 'Connection failed');
+    providerModels = data.models || [];
     if (!providerModels.length) {
       resetModelSelect();
-      $('connectionStatus').textContent = `Connected · ${provider.label} · no Vision models found`;
-      if (showError) showConnectionError(`${provider.label}: connected, but no Vision-capable models were found.`);
+      $('connectionStatus').textContent = 'Connected · no Vision models found';
+      if (showError) showConnectionError(`${provider.label}: connected successfully, but no Vision-capable models were found.`);
       return;
     }
     $('model').innerHTML = '<option value="">Select a Vision model</option>' + providerModels.map(m => `<option value="${escapeAttr(m.id)}">${escapeHtml(m.name || m.id)}</option>`).join('');
@@ -1654,22 +1486,24 @@ async function loadProviderModels({showError=false} = {}) {
     $('model').disabled = false;
     $('model').value = preferred.id;
     $('model').dataset.previous = preferred.id;
-    if (typedApiKey) saveProviderCredential(typedApiKey);
+    if (typedApiKey) await saveProviderCredential(typedApiKey);
     persistSettings();
     $('apiKey').dataset.verified = provider.api_key?.required ? 'true' : 'false';
     renderApiKeyHelp();
     updateMockModeState();
-    $('connectionStatus').textContent = `Connected · ${provider.label} · ${providerModels.length} Vision model${providerModels.length === 1 ? '' : 's'}`;
+    $('connectionStatus').textContent = `Connected · ${provider.label} · ${providerModels.length} Vision model${providerModels.length === 1 ? '' : 's'}` + ($('mockMode').checked ? ' · Mock mode enabled' : '');
   } catch (e) {
     $('apiKey').dataset.verified = 'false';
     resetModelSelect();
     renderApiKeyHelp({forceVisible:true});
     $('connectionStatus').textContent = 'Connection failed';
     if (showError) showConnectionError(`${provider.label}: ${e.message}`);
-  } finally { $('testConnectionBtn').disabled = false; }
+  } finally {
+    $('testConnectionBtn').disabled = false;
+  }
 }
 
-function clearConnection() {
+async function clearConnection() {
   const provider = PROVIDERS[$('provider').value];
   $('apiKey').value = '';
   $('apiKey').dataset.verified = 'false';
@@ -1677,15 +1511,24 @@ function clearConnection() {
   $('model').value = '';
   resetModelSelect();
   renderApiKeyHelp({forceVisible:true});
-  if (provider?.api_key?.required) {
-    const data = JSON.parse(localStorage.getItem('pb-provider-credentials-v1') || '{}');
-    delete data[provider.id];
-    localStorage.setItem('pb-provider-credentials-v1', JSON.stringify(data));
-    SAVED_CREDENTIALS[provider.id] = {has_saved_key:false, required:true};
+  $('connectionStatus').textContent = 'Clearing saved connection...';
+  try {
+    if (provider?.api_key?.required && SAVED_CREDENTIALS[$('provider').value]?.has_saved_key) {
+      const r = await fetch('./api/provider-credentials', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({provider: $('provider').value, apiKey:''})
+      });
+      const data = await r.json();
+      if (!r.ok || !data.ok) throw new Error(data.error || 'Failed to clear saved credential');
+    }
+    SAVED_CREDENTIALS[$('provider').value] = { has_saved_key:false, required: !!provider?.api_key?.required };
+    localStorage.removeItem('pb-ai-settings');
+    updateMockModeState();
+    $('connectionStatus').textContent = 'Not connected';
+  } catch (e) {
+    $('connectionStatus').textContent = 'Could not clear saved connection';
+    showConnectionError(`Failed to clear ${provider?.label || 'provider'} connection: ${e.message}`);
   }
-  persistSettings();
-  updateMockModeState();
-  $('connectionStatus').textContent = 'Not connected';
 }
 
 function showConnectionError(message) {
@@ -1719,19 +1562,18 @@ function showTab(id){
   if (id === 'builder') requestAnimationFrame(ensureConfigureFields);
   if (id === 'templates') renderTemplates();
 }
-function loadPresets() {
+async function loadPresets() {
   try {
-    const raw = localStorage.getItem('pb-presets-v1');
-    const data = raw ? JSON.parse(raw) : [];
-    SAVED_PRESETS = Array.isArray(data) ? data : (Array.isArray(data.presets) ? data.presets : []);
+    const res = await fetch('./api/presets', { cache: 'no-store' });
+    if (!res.ok) throw new Error('Could not load presets');
+    const data = await res.json();
+    SAVED_PRESETS = Array.isArray(data.presets) ? data.presets : [];
+    renderPresetOptions();
   } catch (error) {
     console.warn('[Prompt Builder] Presets unavailable:', error);
     SAVED_PRESETS = [];
+    renderPresetOptions();
   }
-  renderPresetOptions();
-}
-function savePresetsToStorage() {
-  localStorage.setItem('pb-presets-v1', JSON.stringify(SAVED_PRESETS));
 }
 function renderPresetOptions() {
   const menu = $('presetMenu');
@@ -1767,33 +1609,40 @@ function applyPresetValues(values) {
   for (const field of (CONFIG?.fields || [])) {
     if (field.type === 'palette') { setReferencePalette(Array.isArray(values[field.id]) ? values[field.id] : []); continue; }
     const el = $(`field-${field.id}`);
-    if (el && values[field.id] != null) el.value = values[field.id];
+    if (!el || values[field.id] == null) continue;
+    if (el.tagName === 'SELECT' && isCustomAllowed(field) && !Array.from(el.options).some(o => o.value === values[field.id])) {
+      const item = normalizeCustomValue(field, values[field.id]);
+      if (item && item.value === values[field.id]) addCustomValue(field, el, item);
+    }
+    // Skip values that no longer exist in a select (e.g. removed options from older presets).
+    if (el.tagName === 'SELECT' && !Array.from(el.options).some(o => o.value === values[field.id])) continue;
+    el.value = values[field.id];
+    if (el.tagName === 'SELECT') updateCustomRemoveState(el);
   }
+  syncCombos();
   deriveRecommendation(values);
 }
 
-function savePreset() {
+async function savePreset() {
   const name = $('presetName').value.trim();
   if (!name) { alert('Enter a preset name first.'); $('presetName').focus(); return; }
-  const now = new Date().toISOString();
-  const payload = { name, values: getConfigValues(), referenceDescription: $('referenceDescription').value.trim(), prompt: $('finalPrompt').value, updatedAt: now };
-  const existingIndex = SAVED_PRESETS.findIndex(p => p.name === name);
-  if (existingIndex >= 0) SAVED_PRESETS[existingIndex] = { ...SAVED_PRESETS[existingIndex], ...payload };
-  else {
-    SAVED_PRESETS.push({ ...payload, createdAt: now });
-    if (SAVED_PRESETS.length > 20) SAVED_PRESETS = SAVED_PRESETS.slice(-20);
-  }
-  savePresetsToStorage();
+  const payload = { name, values: getConfigValues(), referenceDescription: $('referenceDescription').value.trim(), prompt: $('finalPrompt').value };
+  const res = await fetch('./api/presets', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to save preset');
+  SAVED_PRESETS = data.presets || SAVED_PRESETS;
   renderPresetOptions();
   $('presetName').value = name;
   $('statusBadge').textContent = 'Preset saved';
   saveBuilderState();
 }
-function deletePreset() {
+async function deletePreset() {
   const name = $('presetName').value.trim();
   if (!name) return;
-  SAVED_PRESETS = SAVED_PRESETS.filter(p => p.name !== name);
-  savePresetsToStorage();
+  const res = await fetch('./api/presets/' + encodeURIComponent(name), { method:'DELETE' });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to delete preset');
+  SAVED_PRESETS = data.presets || [];
   renderPresetOptions();
   $('presetName').value='';
 }
@@ -1817,55 +1666,41 @@ $('generateBtn').onclick=async()=>{
 };
 $('copyPromptBtn').onclick=()=>copyText($('finalPrompt').value);
 $('copyPromptIcon').onclick=()=>copyText($('finalPrompt').value);
-$('copyTemplateBtn')?.addEventListener('click',()=>copyText($('editorPromptTemplate')?.value || ''));
-$('copyTemplateIcon')?.addEventListener('click',()=>copyText($('editorPromptTemplate')?.value || ''));
 $('copyJsonBtn').onclick=()=>copyText(JSON.stringify({configuration:getConfigValues(), referenceDescription:$('referenceDescription').value, prompt:$('finalPrompt').value},null,2));
 $('copyRefBtn').onclick=()=>copyText($('referenceDescription').value);
-$('applyAiSuggestionsBtn')?.addEventListener('click', applyAiSuggestions);
-$('exportUserDataBtn')?.addEventListener('click', exportUserData);
-$('importUserDataBtn')?.addEventListener('click', ()=>$('importUserDataInput')?.click());
-$('importUserDataInput')?.addEventListener('change', async (e)=>{ const file=e.target.files?.[0]; if(!file) return; try{ await importUserData(file); alert('User data imported.'); }catch(err){ alert(`Could not import user data: ${err.message}`); } finally { e.target.value=''; } });
-$('saveBtn').onclick=async()=>{try{await savePreset();}catch(e){alert(`Could not save preset: ${e.message}`)}};
 $('presetMenuToggle').onclick=togglePresetMenu;
 $('presetName').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); loadPresetByName($('presetName').value.trim()); $('presetMenu').hidden = true; } });
 $('presetName').addEventListener('focus', () => { if (SAVED_PRESETS.length) renderPresetOptions(); });
 $('presetDeleteBtn').onclick=async()=>{try{await deletePreset();}catch(e){alert(`Could not delete preset: ${e.message}`)}};
+$('presetSaveBtn').onclick=async()=>{try{await savePreset();}catch(e){alert(`Could not save preset: ${e.message}`)}};
 document.addEventListener('click', e => { const wrap=$('presetPicker'); if (wrap && !wrap.contains(e.target)) { const menu=$('presetMenu'); if(menu) menu.hidden=true; } });
 const TOOL_LINKS = {
-  'Magnific': { label: 'Magnific' },
-  'ChatGPT / Codex': { label: 'ChatGPT' },
-  'Figma AI': { label: 'Figma' }
+  'Magnific': { label: 'Magnific', launchKey: 'Magnific' },
+  'ChatGPT': { label: 'ChatGPT', launchKey: 'ChatGPT / Codex' },
+  'Figma': { label: 'Figma', launchKey: 'Figma AI' }
 };
+function toolLinkFor(aiTool) {
+  const name = String(aiTool || '').toLowerCase();
+  if (name.includes('magnific')) return TOOL_LINKS['Magnific'];
+  if (name.includes('chatgpt') || name.includes('codex')) return TOOL_LINKS['ChatGPT'];
+  if (name.includes('figma')) return TOOL_LINKS['Figma'];
+  return null;
+}
 function updateOpenToolButton() {
-  const aiTool = $('field-aiTool')?.value || 'Magnific';
+  const aiTool = $('field-aiTool')?.value || '';
   const launchUrls = CONFIG?.aiToolLaunchUrls || {};
-  const target = { label: TOOL_LINKS[aiTool]?.label || aiTool, url: launchUrls[aiTool] || 'https://chatgpt.com/' };
+  const link = toolLinkFor(aiTool);
+  const target = { label: link?.label || aiTool || 'AI tool', url: link ? (launchUrls[link.launchKey] || '') : '' };
   if ($('toolName')) $('toolName').textContent = target.label;
   $('openToolBtn').dataset.url = target.url;
 }
 $('openToolBtn').onclick=async()=>{
   const prompt = $('finalPrompt').value.trim();
   if (prompt) { try { await navigator.clipboard.writeText(prompt); } catch {} }
-  const url = $('openToolBtn').dataset.url || TOOL_LINKS.Magnific.url;
+  const url = $('openToolBtn').dataset.url;
+  if (!url) { $('statusBadge').textContent = 'Prompt copied (custom tool has no link)'; return; }
   window.open(url,'_blank');
 };
-$('templateAddBtn')?.addEventListener('click', addTemplate);
-$('templateSaveBtn')?.addEventListener('click', async()=>{try{await saveTemplateFile();}catch(e){alert(`Could not save templates: ${e.message}`)}});
-$('templateDuplicateBtn')?.addEventListener('click', duplicateTemplate);
-$('templateDeleteBtn')?.addEventListener('click', deleteTemplate);
-$('editorPromptTemplate')?.addEventListener('input', ()=>{writeTemplateEditorToModel();syncPromptHighlight();});
-$('editorPromptTemplate')?.addEventListener('scroll', syncPromptHighlight);
-['editorTemplateName','editorTemplateSection','editorTemplateCategory','editorTemplateAgent','editorContext','editorEvaluation'].forEach(id=>$(id)?.addEventListener('input', ()=>{writeTemplateEditorToModel();}));
-['editorTemplateSection','editorTemplateCategory','editorTemplateAgent','editorTemplateRating'].forEach(id=>{
-  $(id)?.addEventListener('mousedown', (event)=>{ if ($(id).dataset.readonly === '1') event.preventDefault(); });
-  $(id)?.addEventListener('keydown', (event)=>{ if ($(id).dataset.readonly === '1') event.preventDefault(); });
-});
-$( 'editorPromptTemplate')?.addEventListener('keydown', (event)=>{ if ($('editorPromptTemplate').dataset.readonly === '1') event.preventDefault(); });
-$( 'editorPromptTemplate')?.addEventListener('beforeinput', (event)=>{ if ($('editorPromptTemplate').dataset.readonly === '1') event.preventDefault(); });
-$( 'editorPromptTemplate')?.addEventListener('paste', (event)=>{ if ($('editorPromptTemplate').dataset.readonly === '1') event.preventDefault(); });
-$( 'editorPromptTemplate')?.addEventListener('drop', (event)=>{ if ($('editorPromptTemplate').dataset.readonly === '1') event.preventDefault(); });
-$('editorTemplateRating')?.addEventListener('change', ()=>{writeTemplateEditorToModel();updateEditorRatingStars($('editorTemplateRating').value);});
-document.querySelectorAll('#dynamicFields select').forEach(el=>el.addEventListener('change', ()=>{saveBuilderState(); updateSelectedTemplateInfo();}));
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>showTab(t.dataset.tab));
 document.querySelector('.configure .section-head')?.addEventListener('click', () => {
   // Configure is intentionally non-collapsible. Verify the fields remain mounted.
@@ -1880,103 +1715,45 @@ $('model').addEventListener('change', () => {
   updateMockModeState();
 });
 
-const USER_TEMPLATES_STORAGE_KEY = 'pb-user-templates-v6';
-const BUILDER_STATE_KEY = 'pb-builder-state-v2';
-const BUILDER_STATE_LEGACY_KEY = 'pb-builder-state-v1';
+const BUILDER_STATE_KEY = 'pb-builder-state-v1';
 let __restoringBuilderState = false;
 function saveBuilderState() {
-  if (__restoringBuilderState || !CONFIG?.fields || !hasAllConfigureFields()) return false;
-  try {
-    const payload = { version:'0.1.73', savedAt:new Date().toISOString(), values:getConfigValues(), referenceDescription:$('referenceDescription')?.value||'', finalPrompt:$('finalPrompt')?.value||'', presetName:$('presetName')?.value||'' };
-    localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify(payload));
-    return true;
-  }
+  if (__restoringBuilderState || !CONFIG?.fields || !hasAllConfigureFields()) return;
+  try { localStorage.setItem(BUILDER_STATE_KEY, JSON.stringify({ values:getConfigValues(), referenceDescription:$('referenceDescription')?.value||'', finalPrompt:$('finalPrompt')?.value||'', presetName:$('presetName')?.value||'' })); }
   catch (error) { console.warn('[Prompt Builder] Could not save Builder state.', error); }
 }
 function restoreBuilderState() {
-  try {
-    const raw = localStorage.getItem(BUILDER_STATE_KEY) || localStorage.getItem(BUILDER_STATE_LEGACY_KEY);
-    if (!raw) return false;
-    const state = JSON.parse(raw);
-    if (!state || typeof state !== 'object' || !state.values) return false;
-    __restoringBuilderState = true;
-    ensureConfigureFields();
-    for (const field of (CONFIG?.fields || [])) {
-      if (field.type === 'palette') {
-        setReferencePalette(Array.isArray(state.values[field.id]) ? state.values[field.id] : []);
-      } else {
-        const el = $(`field-${field.id}`);
-        const value = state.values[field.id];
-        if (el && value != null) {
-          const text = String(value);
-          const hasOption = [...el.options].some(o => o.value === text);
-          if (hasOption) el.value = text;
-        }
-      }
-    }
-    if ($('referenceDescription')) $('referenceDescription').value = state.referenceDescription || '';
-    if ($('finalPrompt')) $('finalPrompt').value = state.finalPrompt || '';
-    if ($('presetName')) $('presetName').value = state.presetName || '';
-    updateOpenToolButton();
-    deriveRecommendation(state.values);
-    saveBuilderState();
-    return true;
-  } catch(error){
-    console.warn('[Prompt Builder] Could not restore Builder state.',error);
-    return false;
-  } finally {
-    __restoringBuilderState=false;
-  }
+  try { const raw=localStorage.getItem(BUILDER_STATE_KEY); if(!raw) return; const state=JSON.parse(raw); __restoringBuilderState=true; if(state.values) applyPresetValues(state.values); if($('referenceDescription')) $('referenceDescription').value=state.referenceDescription||''; if($('finalPrompt')) $('finalPrompt').value=state.finalPrompt||''; if($('presetName')) $('presetName').value=state.presetName||''; }
+  catch(error){ console.warn('[Prompt Builder] Could not restore Builder state.',error); }
+  finally { __restoringBuilderState=false; }
 }
-
-function clearPromptBuilderLocalStorage() {
-  if (document.body?.dataset?.pbMode !== 'github') return;
-  const ok = window.confirm('Clear Prompt Builder localStorage? This removes saved Builder state, presets, user templates, provider credentials, and AI settings stored in this browser. Base JSON files will not be changed.');
-  if (!ok) return;
-  const keys = [
-    BUILDER_STATE_KEY,
-    BUILDER_STATE_LEGACY_KEY,
-    'pb-presets-v1',
-    'pb-user-templates-v6',
-    'pb-user-templates-v5',
-    'pb-user-templates-v4',
-    'pb-user-templates-v3',
-    'pb-prompt-templates-v2',
-    'pb-prompt-templates-v1',
-    'pb-builder-config-v1',
-    'pb-custom-dimensions-v1',
-    'pb-ai-settings',
-    'pb-provider-credentials-v1'
-  ];
-  keys.forEach(key => localStorage.removeItem(key));
-  window.location.reload();
-}
-
-function bindBuilderStatePersistence(){
-  ['referenceDescription','finalPrompt','presetName'].forEach(id=>$(id)?.addEventListener('input',saveBuilderState));
-  const root = $('dynamicFields');
-  if (root) {
-    root.addEventListener('input', saveBuilderState, true);
-    root.addEventListener('change', saveBuilderState, true);
-    root.addEventListener('change', () => { try { updateSelectedTemplateInfo(); deriveRecommendation(getConfigValues()); } catch (_) {} }, true);
-  }
-  window.addEventListener('beforeunload',saveBuilderState);
-  window.addEventListener('pagehide',saveBuilderState);
-}
+function bindBuilderStatePersistence(){ ['referenceDescription','finalPrompt','presetName'].forEach(id=>$(id)?.addEventListener('input',saveBuilderState)); window.addEventListener('beforeunload',saveBuilderState); }
 loadPresets();
 bindBuilderStatePersistence();
-$('clearLocalStorageBtn')?.addEventListener('click', clearPromptBuilderLocalStorage);
+$('applyAiSuggestionsBtn')?.addEventListener('click', applyAiSuggestions);
+loadAppVersion();
+$('templateAddBtn')?.addEventListener('click', addTemplate);
+$('templateSaveBtn')?.addEventListener('click', saveTemplateFile);
+$('templateDuplicateBtn')?.addEventListener('click', duplicateTemplate);
+$('templateDeleteBtn')?.addEventListener('click', deleteTemplate);
+$('editorPromptTemplate')?.addEventListener('input', () => { writeTemplateEditorToModel(); syncPromptHighlight(); });
+$('editorPromptTemplate')?.addEventListener('scroll', syncPromptHighlight);
+['editorTemplateName', 'editorContext', 'editorEvaluation'].forEach(id => $(id)?.addEventListener('input', writeTemplateEditorToModel));
+$('editorTemplateRating')?.addEventListener('change', () => { writeTemplateEditorToModel(); updateEditorRatingStars($('editorTemplateRating').value); });
+$('copyTemplateBtn')?.addEventListener('click', () => copyText($('editorPromptTemplate')?.value || ''));
+$('copyTemplateIcon')?.addEventListener('click', () => copyText($('editorPromptTemplate')?.value || ''));
+$('exportUserDataBtn')?.addEventListener('click', exportUserData);
+$('importUserDataBtn')?.addEventListener('click', () => $('importUserDataInput')?.click());
+$('importUserDataInput')?.addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try { await importUserData(file); } catch (err) { userDataStatus('Could not import user data: ' + err.message, false); }
+  finally { e.target.value = ''; }
+});
 
-(async()=>{
-  try {
-    await loadTemplates();
-    await loadConfig();
-    refreshBuilderTaxonomy();
-    restoreBuilderState();
-    requestAnimationFrame(() => { restoreBuilderState(); updateOpenToolButton(); });
-  } catch (error) {
-    console.error('[Prompt Builder] Startup failed:', error);
-    const root = $('dynamicFields');
-    if (root) root.innerHTML = `<div class="muted">Could not load Builder configuration: ${escapeHtml(error.message)}</div>`;
-  }
-})();
+loadTemplates().then(loadConfig).then(()=>{ restoreBuilderState(); updateOpenToolButton(); try { deriveRecommendation(getConfigValues()); } catch (_) {} }).catch(error => {
+  console.error('[Prompt Builder] Startup failed:', error);
+  const root = $('dynamicFields');
+  const hint = location.protocol === 'file:' ? ' The page was opened from a file; serve the folder over HTTP (run "npm start" and open http://localhost:3000) or use GitHub Pages.' : ' Check that the web server is running and reload the page.';
+  if (root) root.innerHTML = `<div class=\"muted\">Could not load Builder configuration: ${escapeHtml(error.message)}.${hint}</div>`;
+});
