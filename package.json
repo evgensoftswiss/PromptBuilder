@@ -1,6 +1,6 @@
 ﻿{
   "name": "prompt-builder",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "private": true,
   "description": "Prompt Builder - static web app for GitHub Pages",
   "scripts": {

@@ -199,8 +199,7 @@ async function persistUserTemplates() {
   const templates = PROMPT_TEMPLATES.filter(isUserTemplate).map(orderedUserTemplate);
   try {
     const response = await fetch('./api/user-templates', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ templates }) });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    refreshBuilderTaxonomy();
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return true;
   } catch (error) {
     console.warn('[Prompt Builder] Could not save user templates:', error);
@@ -300,7 +299,6 @@ async function loadTemplates() {
       if (el && el.dataset.bound !== '1') { el.dataset.bound = '1'; el.addEventListener('change', renderTemplateEditorList); }
     });
     selectedTemplateIndex = PROMPT_TEMPLATES.length ? 0 : -1;
-    refreshBuilderTaxonomy();
     if (selectedTemplateIndex >= 0) populateTemplateEditor(selectedTemplateIndex); else renderTemplateEditorList();
   } catch (error) {
     console.error('[Prompt Builder] Could not load prompt templates:', error);
@@ -308,38 +306,24 @@ async function loadTemplates() {
   }
 }
 
-// Builder Section / Category / AI Tool come from the templates (built-in and user-created).
-const TAXONOMY_FIELDS = { section: 'section', category: 'category', aiTool: 'agent' };
-function refreshBuilderTaxonomy() {
-  if (!Array.isArray(CONFIG?.fields)) return;
-  for (const [fieldId, key] of Object.entries(TAXONOMY_FIELDS)) {
-    const field = CONFIG.fields.find(f => f.id === fieldId);
-    const values = uniqueTemplateValues(key);
-    if (!field || !values.length) continue;
-    field.options = values.map(value => ({ value, label: value }));
-    const select = $(`field-${fieldId}`);
-    if (!select) continue;
-    const current = select.value;
-    const fallback = values.includes(CONFIG.defaults?.[fieldId]) ? CONFIG.defaults[fieldId] : values[0];
-    select.innerHTML = values.map(value => `<option value="${escapeAttr(value)}">${escapeHtml(value)}</option>`).join('');
-    select.value = values.includes(current) ? current : fallback;
-  }
-  if (!$('field-section')) return;
-  syncCombos();
-  updateOpenToolButton();
-  try { deriveRecommendation(getConfigValues()); } catch (error) { console.warn('[Prompt Builder] Could not refresh recommendation.', error); }
+// The Builder's Category / AI Tool values are fixed, so the matching template is looked up by keywords:
+// the AI Tool must match the template agent and the Category word must appear in its section or category.
+function agentMatchesTool(agent, aiTool) {
+  const a = String(agent || '').toLowerCase();
+  const t = String(aiTool || '').toLowerCase();
+  if (!a || !t) return false;
+  if (t.includes('chatgpt')) return a.includes('chatgpt') || a.includes('codex');
+  if (t.includes('figma')) return a.includes('figma');
+  if (t.includes('magnific')) return a.includes('magnific');
+  return a.includes(t);
 }
 function findSelectedTemplateForValues(values) {
-  const section = String(values?.section || '').trim();
-  const category = String(values?.category || '').trim();
-  const agent = String(values?.aiTool || '').trim();
+  const category = String(values?.category || '').trim().toLowerCase();
+  const aiTool = String(values?.aiTool || '').trim();
   // User templates are listed last, so searching from the end lets them override built-in ones.
-  const list = [...PROMPT_TEMPLATES].reverse();
-  const same = (item, key, value) => templateKeyValue(item, key) === value;
-  return list.find(item => same(item, 'section', section) && same(item, 'category', category) && same(item, 'agent', agent))
-    || list.find(item => same(item, 'category', category) && same(item, 'agent', agent))
-    || list.find(item => same(item, 'agent', agent))
-    || null;
+  const byTool = [...PROMPT_TEMPLATES].reverse().filter(item => agentMatchesTool(item.agent, aiTool));
+  const inCategory = item => category && (templateKeyValue(item, 'section') + ' ' + templateKeyValue(item, 'category')).toLowerCase().includes(category);
+  return byTool.find(inCategory) || byTool[0] || null;
 }
 function updateSelectedTemplateInfo(values) {
   const node = $('selectedTemplateInfo');
@@ -486,7 +470,6 @@ async function loadConfig() {
   if (!CONFIG || !Array.isArray(CONFIG.fields)) {
     throw new Error('Invalid Builder configuration: fields must be an array.');
   }
-  refreshBuilderTaxonomy();
 
   // Configure fields must never depend on provider settings or credentials.
   renderFields();
@@ -600,9 +583,8 @@ function buildSelect(field) {
   select.addEventListener('change', () => {
     saveBuilderState();
     updateCustomRemoveState(select);
-    if (!TAXONOMY_FIELDS[field.id]) return;
-    updateOpenToolButton();
-    try { deriveRecommendation(getConfigValues()); } catch (_) {}
+    if (field.id === 'aiTool') updateOpenToolButton();
+    if (field.id === 'aiTool' || field.id === 'category') { try { deriveRecommendation(getConfigValues()); } catch (_) {} }
   });
   return select;
 }
@@ -1253,7 +1235,7 @@ async function generateFinalWithAI(referenceDescription) {
   const values = getConfigValues();
   const res = await fetch('./api/generate', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({settings, values, referenceDescription, template: findSelectedTemplateForValues(values)?.prompt_template || ''})
+    body:JSON.stringify({settings, values, referenceDescription})
   });
   if (!res.ok) { const t = await res.text(); throw new Error(t); }
   const data = await res.json();

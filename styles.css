@@ -282,3 +282,7 @@ button:focus-visible{outline:2px solid var(--purple2);outline-offset:2px}
 .ai-suggestion-grid span{font-size:12px;color:var(--text)}
 .selected-template-info{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.4}
 @media(max-width:700px){.ai-suggestion-grid{grid-template-columns:1fr}}
+
+/* AI connection selects: same arrow as other dropdown fields */
+#provider,#model{-webkit-appearance:none;appearance:none;padding-right:38px;cursor:pointer;background-color:#fff;background-image:var(--select-arrow);background-repeat:no-repeat;background-position:right 15px center;background-size:8px 5px}
+#provider:disabled,#model:disabled{cursor:not-allowed}

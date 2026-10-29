@@ -4,28 +4,42 @@
   "source": "Prompt Library Inventory + sketch.png",
   "fields": [
     {
-      "id": "section",
-      "label": "Section",
-      "type": "select",
-      "required": true,
-      "allowCustom": false,
-      "options": []
-    },
-    {
       "id": "category",
       "label": "Category",
       "type": "select",
       "required": true,
-      "allowCustom": false,
-      "options": []
+      "options": [
+        {
+          "value": "Sportsbook",
+          "label": "Sportsbook"
+        },
+        {
+          "value": "Casino",
+          "label": "Casino"
+        }
+      ],
+      "maxCustom": 20
     },
     {
       "id": "aiTool",
       "label": "AI Tool",
       "type": "select",
       "required": true,
-      "allowCustom": false,
-      "options": []
+      "options": [
+        {
+          "value": "Magnific",
+          "label": "Magnific"
+        },
+        {
+          "value": "Figma AI",
+          "label": "Figma AI"
+        },
+        {
+          "value": "ChatGPT / Codex",
+          "label": "ChatGPT / Codex"
+        }
+      ],
+      "maxCustom": 10
     },
     {
       "id": "theme",
@@ -237,8 +251,7 @@
     }
   ],
   "defaults": {
-    "section": "Sportsbook Banners",
-    "category": "Casino Banners",
+    "category": "Sportsbook",
     "aiTool": "Magnific",
     "theme": "Champions League",
     "composition": "Character right",
