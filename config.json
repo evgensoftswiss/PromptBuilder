@@ -4,18 +4,35 @@
   "source": "Prompt Library Inventory + sketch.png",
   "fields": [
     {
+      "id": "section",
+      "label": "Section",
+      "type": "select",
+      "required": true,
+      "options": [
+        {
+          "value": "Sportsbook Banners",
+          "label": "Sportsbook Banners"
+        },
+        {
+          "value": "Casino Banners",
+          "label": "Casino Banners"
+        }
+      ],
+      "maxCustom": 20
+    },
+    {
       "id": "category",
       "label": "Category",
       "type": "select",
       "required": true,
       "options": [
         {
-          "value": "Sportsbook",
-          "label": "Sportsbook"
+          "value": "Sportsbook Banners",
+          "label": "Sportsbook Banners"
         },
         {
-          "value": "Casino",
-          "label": "Casino"
+          "value": "Casino Banners",
+          "label": "Casino Banners"
         }
       ],
       "maxCustom": 20
@@ -171,27 +188,39 @@
       "maxCustom": 50
     },
     {
-      "id": "composition",
-      "label": "Composition",
+      "id": "sceneElements",
+      "label": "Scene elements",
       "type": "select",
       "required": true,
       "options": [
-        {
-          "value": "No character",
-          "label": "No character"
-        },
-        {
-          "value": "Character right",
-          "label": "Character right"
-        },
-        {
-          "value": "Character left",
-          "label": "Character left"
-        },
-        {
-          "value": "Character center",
-          "label": "Character center"
-        }
+        { "value": "Object only", "label": "Object only" },
+        { "value": "Character only", "label": "Character only" },
+        { "value": "Object + character", "label": "Object + character" },
+        { "value": "Custom", "label": "Custom" }
+      ],
+      "maxCustom": 10
+    },
+    {
+      "id": "placement",
+      "label": "Placement",
+      "type": "select",
+      "required": true,
+      "options": [
+        { "value": "Right", "label": "Right", "sceneElements": ["Object only", "Character only"] },
+        { "value": "Left", "label": "Left", "sceneElements": ["Object only", "Character only"] },
+        { "value": "Center", "label": "Center", "sceneElements": ["Object only", "Character only"] },
+        { "value": "Upper left", "label": "Upper left", "sceneElements": ["Object only", "Character only"] },
+        { "value": "Upper center", "label": "Upper center", "sceneElements": ["Object only", "Character only"] },
+        { "value": "Upper right", "label": "Upper right", "sceneElements": ["Object only", "Character only"] },
+        { "value": "Lower left", "label": "Lower left", "sceneElements": ["Object only", "Character only"] },
+        { "value": "Lower center", "label": "Lower center", "sceneElements": ["Object only", "Character only"] },
+        { "value": "Lower right", "label": "Lower right", "sceneElements": ["Object only", "Character only"] },
+        { "value": "Character left / object right", "label": "Character left / object right", "sceneElements": ["Object + character"] },
+        { "value": "Character right / object left", "label": "Character right / object left", "sceneElements": ["Object + character"] },
+        { "value": "Character foreground / object background", "label": "Character foreground / object background", "sceneElements": ["Object + character"] },
+        { "value": "Object foreground / character background", "label": "Object foreground / character background", "sceneElements": ["Object + character"] },
+        { "value": "Side by side", "label": "Side by side", "sceneElements": ["Object + character"] },
+        { "value": "Custom — specify in Clarification", "label": "Custom — specify in Clarification", "sceneElements": ["Custom"] }
       ],
       "maxCustom": 10
     },
@@ -251,10 +280,12 @@
     }
   ],
   "defaults": {
-    "category": "Sportsbook",
+    "section": "Sportsbook Banners",
+    "category": "Sportsbook Banners",
     "aiTool": "Magnific",
     "theme": "Champions League",
-    "composition": "Character right",
+    "sceneElements": "Character only",
+    "placement": "Right",
     "dimensions": "1920 x 700 (Landscape)"
   },
   "promptLibrary": {
@@ -280,9 +311,9 @@
     ]
   },
   "promptTemplates": {
-    "Magnific": "Create a premium image-generation prompt for Magnific. Objective: {category} / {theme}. Build the image around one dominant hero subject or object. Character placement: {composition}. Dimensions: {dimensions}. Color palette: {color palette}. Use the shared Description of references for visual language only. Specify subject placement, scale, background, lighting, materials, textures, depth, atmosphere, supporting elements, and negative constraints. Keep the composition clean, premium, and generation-ready.",
-    "Figma AI": "Create a concise, precise image-generation prompt for Figma AI. Create a {category} / {theme} visual. Character placement: {composition}. Dimensions: {dimensions}. Color palette: {color palette}. Use Description of references only for shared visual characteristics; do not copy artwork or unique objects. Include subject, placement, lighting, materials, background, depth, and what to avoid. Prioritize a clear focal point and readable composition.",
-    "ChatGPT / Codex": "# FINAL IMAGE GENERATION PROMPT\n## 1. Objective Summary\nCreate a premium {format} for {category/campaign}, built around a single hero object or subject: {hero subject}. The image should feel premium and polished.\n\n## 2. Creative References\nUse the shared Description of references for inspiration only. Do not copy layouts, artwork, exact text, logos, or unique subjects.\n\n## 3. Core Style Rules\nTheme: {theme}\nColor palette: {color palette}\n\n## 4. Composition Specification\nCharacter placement: {composition}\nDimensions: {dimensions}\nDefine hero placement, scale, background, lighting, materials, atmosphere, supporting elements, and visual hierarchy.\n\n## 5. Negative Prompt\nAvoid clutter, multiple focal points, flat lighting, poor spacing, inconsistent reflections, low-quality materials, irrelevant decorative elements, and unwanted cropping."
+    "Magnific": "Create a premium image-generation prompt for Magnific. Objective: {category} / {theme}. Build the image around one dominant hero subject or object. Scene elements: {sceneElements}. Placement: {placement}. Dimensions: {dimensions}. Color palette: {color palette}. Use the shared Description of references for visual language only. Specify subject placement, scale, background, lighting, materials, textures, depth, atmosphere, supporting elements, and negative constraints. Keep the composition clean, premium, and generation-ready.",
+    "Figma AI": "Create a concise, precise image-generation prompt for Figma AI. Create a {category} / {theme} visual. Scene elements: {sceneElements}. Placement: {placement}. Dimensions: {dimensions}. Color palette: {color palette}. Use Description of references only for shared visual characteristics; do not copy artwork or unique objects. Include subject, placement, lighting, materials, background, depth, and what to avoid. Prioritize a clear focal point and readable composition.",
+    "ChatGPT / Codex": "# FINAL IMAGE GENERATION PROMPT\n## 1. Objective Summary\nCreate a premium {format} for {category/campaign}, built around a single hero object or subject: {hero subject}. The image should feel premium and polished.\n\n## 2. Creative References\nUse the shared Description of references for inspiration only. Do not copy layouts, artwork, exact text, logos, or unique subjects.\n\n## 3. Core Style Rules\nTheme: {theme}\nColor palette: {color palette}\n\n## 4. Composition Specification\nScene elements: {sceneElements}\nPlacement: {placement}\nDimensions: {dimensions}\nDefine hero placement, scale, background, lighting, materials, atmosphere, supporting elements, and visual hierarchy.\n\n## 5. Negative Prompt\nAvoid clutter, multiple focal points, flat lighting, poor spacing, inconsistent reflections, low-quality materials, irrelevant decorative elements, and unwanted cropping."
   },
   "promptGeneration": {
     "templateSource": "promptTemplates",

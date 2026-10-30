@@ -24,7 +24,7 @@
   const storedKey = (id) => String((read(KEYS.providerKeys, {}) || {})[id] || '');
 
   function core() {
-    return corePromise || (corePromise = Promise.all([import('./core.js'), providers()]).then(([mod, list]) =>
+    return corePromise || (corePromise = Promise.all([import('./core.js?v=2.1.0'), providers()]).then(([mod, list]) =>
       mod.createCore({ providers: list, getApiKey: (s) => String(s?.apiKey || '').trim() || storedKey(s?.provider) })));
   }
 
@@ -91,6 +91,10 @@
 
     try {
       if (route === 'analyze') return json(await (await core()).analyze(body()));
+      if (route === 'generation-request') {
+        const request = (await core()).buildGenerationRequest(body(), await getJson('./config.json'));
+        return json({ prompt: request.clipboardPrompt });
+      }
       if (route === 'generate') return json(await (await core()).generate(body(), await getJson('./config.json')));
     } catch (e) { return text(e.message, 500); }
 

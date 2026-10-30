@@ -4,6 +4,23 @@ Version source of truth: `version` in `package.json` (shown in the app header).
 Bump rules: patch (x.y.Z) for fixes, minor (x.Y.0) for features/behavior changes, major for breaking changes.
 Every change set must bump the version and add an entry here.
 
+## 2.1.0
+- Builder: added Section and configurable scene elements / placement, with reference analysis filling the corresponding fields.
+- References: parse pasted ChatGPT JSON responses through the same flow as built-in AI analysis; copy references with an analysis instruction and copy prompt-generation data for use without an API key.
+- Results: add generated prompts to Templates with Builder parameters stored in Context; disable actions when their required input or AI model is unavailable.
+- Templates: align Section / Category / AI Tool matching and preserve the source template metadata. Added prompt constraints and Vision model support.
+- Updated local launch behavior and refreshed asset cache versions. Recorded the accumulated Builder changes as this release.
+
+## 2.0.5
+- Fixed LM Studio model listing by accepting the provider in the OpenAI-compatible API path; versioned the core module import to avoid stale cached logic.
+- Expanded LM Studio Vision model name patterns.
+
+## 2.0.4
+- Settings: Provider setup card stretches to full column height; Config source preview fills the remaining space.
+- README: added Python and alternative server options for local development.
+- Added `start.bat` for one-click server launch on Windows.
+- Added LM Studio provider for local inference server (localhost:1234/v1).
+
 ## 2.0.3
 - Templates: built-in (read-only) templates showed an empty Prompt template field because the read-only background covered the highlighted text; fixed. Asset links now carry a version query to avoid stale browser cache (update it with each release).
 

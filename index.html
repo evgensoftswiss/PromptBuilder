@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Prompt Builder</title>
-  <link rel="stylesheet" href="styles.css?v=2.0.3" />
+  <link rel="stylesheet" href="styles.css?v=2.1.0" />
 </head>
 <body>
   <header class="topbar">
@@ -30,13 +30,14 @@
           <div id="thumbs" class="thumbs"></div>
           <div class="subhead">Description of references</div>
           <textarea id="referenceDescription" class="reference-box" placeholder="AI-generated reference description will appear here..."></textarea>
-          <div class="inline-actions"><button class="primary small" id="analyzeBtn">✦ Analyze with AI</button><button class="secondary small" id="copyRefBtn">{} Copy Description</button></div>
+          <div class="reference-actions">
+            <div class="reference-ai-actions"><button class="primary small" id="analyzeBtn" disabled>✦ Analyze with AI</button><button type="button" class="secondary small" id="copyReferencesBtn" disabled>Copy image with prompt</button></div>
+          </div>
+          <div id="referenceCopyStatus" class="clipboard-status" aria-live="polite"></div>
           <div id="aiSuggestions" class="ai-suggestions" hidden>
-            <div class="ai-suggestions-head"><strong>AI suggestions</strong><button type="button" class="secondary small" id="applyAiSuggestionsBtn">Apply AI suggestions</button></div>
-            <div class="ai-suggestion-grid">
-              <div><small>Style</small><span id="aiSuggestedStyle">—</span></div>
-              <div><small>Composition</small><span id="aiSuggestedComposition">—</span></div>
-            </div>
+            <div class="ai-suggestions-head"><strong>AI suggestion</strong></div>
+            <div class="ai-suggestion-value" id="aiSuggestedStyle" aria-live="polite">—</div>
+            <button type="button" class="secondary small" id="applyAiSuggestionsBtn">Apply AI suggestion</button>
           </div>
         </section>
 
@@ -44,7 +45,10 @@
           <div class="section-head"><h2>2. Configure</h2></div>
           <div id="dynamicFields"></div>
           <div class="actions">
-            <button class="primary" id="generateBtn">✦ Generate Prompt</button><div class="selected-template-info" id="selectedTemplateInfo" aria-live="polite">Template: —</div>
+            <button class="primary" id="generateBtn" disabled>✦ Generate Prompt</button>
+            <button type="button" class="secondary" id="copyGenerationDataBtn" disabled>Copy data for prompt generation</button>
+            <div id="generationCopyStatus" class="clipboard-status" aria-live="polite"></div>
+            <div class="selected-template-info" id="selectedTemplateInfo" aria-live="polite">Template: —</div>
             <div class="field preset-block">
               <label for="presetName">Preset</label>
               <div class="preset-row">
@@ -62,14 +66,15 @@
         <section class="card result-panel">
           <div class="section-head"><h2>3. Result</h2><span id="statusBadge" class="badge gray"></span></div>
           <div class="subhead">Final Prompt</div>
-          <div class="prompt-box"><button class="copy-icon" id="copyPromptIcon">⧉</button><textarea id="finalPrompt"></textarea></div>
-          <div class="result-actions"><button class="primary" id="copyPromptBtn">⧉ Copy Prompt</button><button class="secondary" id="copyJsonBtn">{} Copy JSON</button></div>
+          <div class="prompt-box"><button class="copy-icon" id="copyPromptIcon" disabled>⧉</button><textarea id="finalPrompt"></textarea></div>
+          <div class="result-actions"><button class="primary" id="copyPromptBtn" disabled>⧉ Copy Prompt</button><button class="secondary" id="copyJsonBtn" disabled title="Copy current Builder configuration, reference description, and prompt as JSON">{} Copy JSON</button></div>
           <div class="divider"></div>
           <div class="subhead">Rating &amp; Recommendations</div>
           <div class="rating-box">
             <div class="rating-row"><span>Effectiveness</span><strong id="ratingStars">Not evaluated</strong><b id="ratingScore"></b><span id="validationBadge" class="badge gray">Not evaluated</span></div><div class="rec-grid"><div><small>Best for:</small><p id="bestFor">No source-backed recommendation available.</p></div><div><small>Recommended for:</small><div id="recommendations" class="chips"></div></div><div><small>Limitations:</small><p id="limitations">No source-backed limitation recorded.</p></div></div>
           </div>
-          <button class="open-btn" id="openToolBtn">Open in <b id="toolName">Magnific</b></button>
+          <button class="open-btn" id="openToolBtn" disabled>Open in <b id="toolName">Magnific</b></button>
+          <button type="button" class="primary add-to-templates-btn" id="addToTemplatesBtn" disabled>Add to templates</button>
         </section>
       </div>
       <footer class="workflow">
@@ -172,8 +177,8 @@
     </section>
   </main>
   <div id="aiLoadingOverlay" class="ai-loading-overlay" hidden aria-live="polite"><div class="ai-loading-card"><div class="ai-spinner"></div><div id="aiLoadingMessage" class="ai-loading-message">Working with AI…</div><div class="ai-loading-sub">Please wait for the response.</div></div></div>
-<script src="static-api.js?v=2.0.3"></script>
-<script src="json-editor.js?v=2.0.3"></script>
-<script src="app.js?v=2.0.3"></script>
+<script src="static-api.js?v=2.1.0"></script>
+<script src="json-editor.js?v=2.1.0"></script>
+<script src="app.js?v=2.1.0"></script>
 </body>
 </html>

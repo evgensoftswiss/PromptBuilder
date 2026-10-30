@@ -1,9 +1,13 @@
-﻿{
+{
   "name": "prompt-builder",
-  "version": "2.0.3",
+  "version": "2.1.0",
   "private": true,
   "description": "Prompt Builder - static web app for GitHub Pages",
   "scripts": {
-    "start": "npx --yes http-server . -p 3000 -c-1"
+    "start": "npx --yes http-server . -p 3000 -c-1",
+    "install-deps": "npx --yes npm install -g http-server"
+  },
+  "devDependencies": {
+    "http-server": "^14.11.1"
   }
 }

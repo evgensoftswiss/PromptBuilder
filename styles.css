@@ -275,13 +275,24 @@ button:focus-visible{outline:2px solid var(--purple2);outline-offset:2px}
 /* AI suggestions and selected template info */
 .ai-suggestions{margin-top:12px;padding:12px 14px;border:1px solid #e6e0ff;border-radius:var(--radius-sm);background:#faf9ff}
 .ai-suggestions[hidden]{display:none}
-.ai-suggestions-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.reference-actions{margin-top:8px}
+.reference-ai-actions{display:grid;gap:8px;min-width:0}
+.reference-actions button{min-width:0;width:100%;padding-inline:12px;white-space:nowrap}
+.references-panel{container-type:inline-size;container-name:references-area}
+.clipboard-status{min-height:0;color:#047857;font-size:12px;line-height:1.4}
+.clipboard-status:empty{display:none}
+.open-btn:disabled,.copy-icon:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.ai-suggestions{display:grid;gap:10px}
+.ai-suggestions-head{display:flex;align-items:center;gap:10px;margin:0}
+.ai-suggestions-head strong{font-size:13px;font-weight:700;color:#4338a8}
+.ai-suggestion-value{min-height:42px;padding:10px 12px;border:1px solid #e6e0ff;border-radius:var(--radius-sm);background:#fff;color:var(--text);font-size:13px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.ai-suggestions #applyAiSuggestionsBtn{justify-self:start}
 .ai-suggestion-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .ai-suggestion-grid>div{display:grid;gap:4px}
 .ai-suggestion-grid small{color:var(--muted);font-size:11px}
 .ai-suggestion-grid span{font-size:12px;color:var(--text)}
 .selected-template-info{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.4}
-@media(max-width:700px){.ai-suggestion-grid{grid-template-columns:1fr}}
+@media(max-width:700px){.ai-suggestion-grid{grid-template-columns:1fr}.ai-suggestions #applyAiSuggestionsBtn{justify-self:stretch}}
 
 /* AI connection selects: same arrow as other dropdown fields */
 #provider,#model{-webkit-appearance:none;appearance:none;padding-right:38px;cursor:pointer;background-color:#fff;background-image:var(--select-arrow);background-repeat:no-repeat;background-position:right 15px center;background-size:8px 5px}
@@ -290,3 +301,18 @@ button:focus-visible{outline:2px solid var(--purple2);outline-offset:2px}
 /* Keep the highlighted <pre> visible under the transparent textarea, also for read-only templates */
 .is-readonly .code-editor{background:#f8fafc}
 .is-readonly .code-editor textarea,.code-editor textarea{background:transparent!important}
+
+/* v2.0.4: Provider setup fills column height */
+.settings-layout{align-items:stretch}
+.settings-layout>.settings-card:nth-child(2){display:flex;flex-direction:column}
+.settings-layout>.settings-card:nth-child(2) #configPreview{flex:1 1 auto;min-height:200px;margin:0;overflow:auto}
+@media(max-width:900px){.settings-layout>.settings-card:nth-child(2) #configPreview{max-height:420px}}
+.settings-layout>.settings-card:nth-child(2) #configPreview{max-height:none}
+@media(max-width:900px){.settings-layout>.settings-card:nth-child(2) #configPreview{max-height:420px}}
+.settings-layout>.settings-card:nth-child(2) #configPreview{flex:1 1 0;height:0;min-height:200px}
+@media(max-width:900px){.settings-layout>.settings-card:nth-child(2) #configPreview{flex:none;height:auto}}
+.settings-layout>.settings-card:nth-child(2) #configPreview{contain:size}
+@media(max-width:900px){.settings-layout>.settings-card:nth-child(2) #configPreview{contain:none}}
+
+/* Save the generated Builder result as a reusable template */
+.add-to-templates-btn{width:100%;height:52px;margin-top:10px;font-size:15px}

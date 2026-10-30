@@ -234,6 +234,45 @@
       },
       "help": "Any provider exposing an OpenAI-compatible /models and /chat/completions API.",
       "details": "Use this for compatible gateways or self-hosted inference endpoints."
+    },
+    {
+      "id": "lm-studio",
+      "label": "LM Studio",
+      "base_url": "http://localhost:1234/v1",
+      "api_key": {
+        "required": false,
+        "placeholder": "Not required for local LM Studio"
+      },
+      "models": {
+        "list_mode": "openai_compatible",
+        "vision_only": true,
+        "vision_detection": "name_patterns",
+        "vision_patterns": [
+          "llava",
+          "qwen-vl",
+          "qwen2-vl",
+          "qwen2.5-vl",
+          "qwen3-vl",
+          "qwen3.5-9b",
+          "minicpm-v",
+          "gemma-3",
+          "pixtral",
+          "molmo",
+          "internvl",
+          "vision",
+          "multimodal"
+        ],
+        "exclude_patterns": [
+          "audio",
+          "transcribe",
+          "tts",
+          "embedding",
+          "moderation",
+          "realtime"
+        ]
+      },
+      "help": "LM Studio local inference server. Enable 'Vision' models in LM Studio settings.",
+      "details": "LM Studio runs locally and provides an OpenAI-compatible API. No API key is required. Start LM Studio, enable Vision models, and the server will be available at localhost:1234."
     }
   ],
   "notes": {

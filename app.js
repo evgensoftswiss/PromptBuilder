@@ -2,6 +2,7 @@ let CONFIG = null;
 let refs = [];
 let currentResult = null;
 let providerModels = [];
+let aiActionBusy = false;
 
 const $ = (id) => document.getElementById(id);
 
@@ -242,7 +243,79 @@ async function addTemplate() {
   await persistUserTemplates();
   populateTemplateEditor(selectedTemplateIndex);
 }
-async function duplicateTemplate() {
+async function addBuilderResultTemplate() {
+  const button = $('addToTemplatesBtn');
+  if (!button || button.disabled) return;
+
+  const prompt = $('finalPrompt')?.value.trim() || '';
+  if (!prompt) { $('statusBadge').textContent = 'Generate a prompt before adding it to Templates.'; return; }
+
+  const previousIndex = selectedTemplateIndex;
+  let createdIndex = -1;
+  let persisted = false;
+  button.dataset.busy = 'true';
+  button.textContent = 'Saving template…';
+  updateBuilderActionStates();
+  try {
+    const values = getConfigValues();
+    const matchedTemplate = findSelectedTemplateForValues(values);
+    const category = String(values.category || templateKeyValue(matchedTemplate, 'category') || '').trim();
+    const agent = String(values.aiTool || templateKeyValue(matchedTemplate, 'agent') || '').trim();
+    const section = String(values.section || templateKeyValue(matchedTemplate, 'section') || category).trim();
+    if (!section || !category || !agent) throw new Error('Select a Category and AI Tool before saving this template.');
+
+    const now = new Date().toISOString();
+    const item = {
+      id: nextUserTemplateId(),
+      _source: 'user',
+      name: nextTemplateName(section, agent),
+      section,
+      category,
+      agent,
+      prompt_template: prompt,
+      context: JSON.stringify({
+        builderParameters: values,
+        referenceDescription: $('referenceDescription')?.value.trim() || ''
+      }, null, 2),
+      effectiveness_rating: 'Average',
+      evaluation: '',
+      createdAt: now,
+      updatedAt: now
+    };
+    PROMPT_TEMPLATES.push(item);
+    createdIndex = PROMPT_TEMPLATES.length - 1;
+
+    if (!await persistUserTemplates()) {
+      PROMPT_TEMPLATES.splice(createdIndex, 1);
+      selectedTemplateIndex = previousIndex;
+      createdIndex = -1;
+      throw new Error('Could not save the template. Please try again.');
+    }
+    persisted = true;
+
+    selectedTemplateIndex = createdIndex;
+    ['templateSection', 'templateCategory', 'templateAgent'].forEach(id => {
+      const filter = $(id);
+      if (filter) filter.value = 'All';
+    });
+    refreshTemplateFilters();
+    showTab('templates');
+    populateTemplateEditor(createdIndex);
+    setEditorStatus('Template added from Builder', true);
+  } catch (error) {
+    if (!persisted && createdIndex >= 0 && PROMPT_TEMPLATES[createdIndex]?._source === 'user') {
+      PROMPT_TEMPLATES.splice(createdIndex, 1);
+      selectedTemplateIndex = previousIndex;
+    }
+    $('statusBadge').textContent = error.message || 'Could not add the template.';
+  } finally {
+    delete button.dataset.busy;
+    button.textContent = 'Add to templates';
+    updateBuilderActionStates();
+  }
+}
+async function duplicateTemplate() {
+
   const source = PROMPT_TEMPLATES[selectedTemplateIndex];
   if (!source) return;
   const now = new Date().toISOString();
@@ -306,8 +379,7 @@ async function loadTemplates() {
   }
 }
 
-// The Builder's Category / AI Tool values are fixed, so the matching template is looked up by keywords:
-// the AI Tool must match the template agent and the Category word must appear in its section or category.
+// Match Builder metadata to the source template's Section, Category, and AI Tool.
 function agentMatchesTool(agent, aiTool) {
   const a = String(agent || '').toLowerCase();
   const t = String(aiTool || '').toLowerCase();
@@ -318,12 +390,18 @@ function agentMatchesTool(agent, aiTool) {
   return a.includes(t);
 }
 function findSelectedTemplateForValues(values) {
+  const section = String(values?.section || '').trim().toLowerCase();
   const category = String(values?.category || '').trim().toLowerCase();
   const aiTool = String(values?.aiTool || '').trim();
   // User templates are listed last, so searching from the end lets them override built-in ones.
   const byTool = [...PROMPT_TEMPLATES].reverse().filter(item => agentMatchesTool(item.agent, aiTool));
-  const inCategory = item => category && (templateKeyValue(item, 'section') + ' ' + templateKeyValue(item, 'category')).toLowerCase().includes(category);
-  return byTool.find(inCategory) || byTool[0] || null;
+  const exactSectionAndCategory = item =>
+    (!section || templateKeyValue(item, 'section').toLowerCase() === section) &&
+    (!category || templateKeyValue(item, 'category').toLowerCase() === category);
+  if (section && category) return byTool.find(exactSectionAndCategory) || null;
+  return byTool.find(item => section && templateKeyValue(item, 'section').toLowerCase() === section) ||
+    byTool.find(item => category && templateKeyValue(item, 'category').toLowerCase() === category) ||
+    byTool[0] || null;
 }
 function updateSelectedTemplateInfo(values) {
   const node = $('selectedTemplateInfo');
@@ -334,35 +412,137 @@ function updateSelectedTemplateInfo(values) {
     : 'Template: —';
   return match;
 }
-function setAiSuggestions(style, composition) {
+function setAiSuggestions(style, placement) {
   const box = $('aiSuggestions');
   if (!box) return;
-  $('aiSuggestedStyle').textContent = style || '—';
-  $('aiSuggestedComposition').textContent = composition || '—';
-  box.hidden = !(style || composition);
+  const suggestion = $('aiSuggestedStyle');
+  if (suggestion) suggestion.textContent = style || '—';
+  box.hidden = !(style || placement);
   box.dataset.style = style || '';
-  box.dataset.composition = composition || '';
+  box.dataset.placement = placement || '';
 }
+
+function parseReferenceAnalysisResponse(text) {
+  const source = String(text || '').trim();
+  if (!source) return null;
+  const unfenced = source.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  let data;
+  try {
+    data = JSON.parse(unfenced);
+  } catch {
+    const start = unfenced.indexOf('{');
+    const end = unfenced.lastIndexOf('}');
+    if (start < 0 || end <= start) return null;
+    try { data = JSON.parse(unfenced.slice(start, end + 1)); } catch { return null; }
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+
+  const suggestions = data.suggestions && typeof data.suggestions === 'object' ? data.suggestions : {};
+  const result = {
+    description: typeof data.description === 'string' ? data.description.trim() : '',
+    palette: Array.isArray(data.palette)
+      ? data.palette.map(color => String(color || '').trim().toUpperCase()).filter(color => /^#[0-9A-F]{6}$/.test(color)).slice(0, 8)
+      : null,
+    style: String(suggestions.style || data.style || '').trim().slice(0, 120),
+    sceneElements: String(suggestions.sceneElements || data.sceneElements || '').trim(),
+    placement: String(suggestions.placement || data.placement || '').trim()
+  };
+
+  const legacyComposition = String(suggestions.composition || data.composition || '').trim();
+  if (!result.sceneElements && legacyComposition) {
+    const legacyMatch = legacyComposition.match(/^(Character|Object)\s+(left|center|right)$/i);
+    if (legacyMatch) {
+      result.sceneElements = `${legacyMatch[1][0].toUpperCase()}${legacyMatch[1].slice(1).toLowerCase()} only`;
+      result.placement ||= `${legacyMatch[2][0].toUpperCase()}${legacyMatch[2].slice(1).toLowerCase()}`;
+    } else if (/^No character$/i.test(legacyComposition)) {
+      result.sceneElements = 'Object only';
+    } else {
+      result.sceneElements = 'Custom';
+      result.placement ||= legacyComposition;
+    }
+  }
+
+  return result.description || result.palette?.length || result.sceneElements || result.placement || result.style
+    ? result
+    : null;
+}
+
+function applyReferenceAnalysisResult(data, statusText = 'Analyzed') {
+  const description = String(data?.description || '').trim();
+  if (description) {
+    $('referenceDescription').value = description;
+    $('referenceDescription').dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  if (Array.isArray(data?.palette)) setReferencePalette(data.palette);
+  setAiSuggestions(String(data?.style || data?.suggestions?.style || ''), '');
+  applyReferenceCompositionSuggestion(
+    data?.sceneElements || data?.suggestions?.sceneElements,
+    data?.placement || data?.suggestions?.placement
+  );
+  $('statusBadge').textContent = statusText;
+  currentResult = {
+    referenceDescription: description || $('referenceDescription').value.trim(),
+    palette: getPaletteColors(),
+    sceneElements: $('field-sceneElements')?.value || '',
+    placement: $('field-placement')?.value || ''
+  };
+  updateBuilderActionStates();
+  saveBuilderState();
+}
+
+function handleReferenceAnalysisPaste(event) {
+  const pastedText = event.clipboardData?.getData('text/plain') || '';
+  const result = parseReferenceAnalysisResponse(pastedText);
+  if (!result) return;
+  event.preventDefault();
+  applyReferenceAnalysisResult(result, 'Analysis response applied');
+}
+
+function handleReferenceDescriptionInput() {
+  updateBuilderActionStates();
+  const result = parseReferenceAnalysisResponse($('referenceDescription')?.value || '');
+  if (result) applyReferenceAnalysisResult(result, 'Analysis response applied');
+}
+
 function applyAiSuggestions() {
   const box = $('aiSuggestions');
   if (!box) return;
   const style = box.dataset.style || '';
-  const composition = box.dataset.composition || '';
-  const compositionEl = $('field-composition');
-  if (compositionEl && composition) {
-    const match = [...compositionEl.options].find(o => o.value.toLowerCase() === composition.toLowerCase());
-    if (match) { compositionEl.value = match.value; compositionEl.dispatchEvent(new Event('change', { bubbles: true })); }
+  const placement = box.dataset.placement || '';
+  const placementEl = $('field-placement');
+  if (placementEl && placement) {
+    const match = [...placementEl.options].find(o => o.value.toLowerCase() === placement.toLowerCase());
+    if (match) { placementEl.value = match.value; placementEl.dispatchEvent(new Event('change', { bubbles: true })); }
   }
-  // There is no separate Style field, so the suggested style goes into Clarification.
+  // Style suggestions are added to Clarification because Configure has no Style field.
   const clarification = $('field-clarification');
-  const styleLine = style ? `Style: ${style}` : '';
-  if (clarification && styleLine && !clarification.value.includes(styleLine)) {
-    clarification.value = clarification.value.trim() ? `${clarification.value.trim()}\n${styleLine}` : styleLine;
+  if (clarification && style && !clarification.value.includes(style)) {
+    clarification.value = clarification.value.trim() ? `${clarification.value.trim()}\n${style}` : style;
     clarification.dispatchEvent(new Event('input', { bubbles: true }));
   }
   syncCombos();
   saveBuilderState();
   box.hidden = true;
+}
+
+function applyReferenceCompositionSuggestion(sceneElements, placement) {
+  const sceneSelect = $('field-sceneElements');
+  const placementSelect = $('field-placement');
+  if (!sceneSelect || !placementSelect) return;
+
+  const sceneMatch = [...sceneSelect.options].find(option => option.value.toLowerCase() === String(sceneElements || '').trim().toLowerCase());
+  if (sceneMatch && sceneSelect.value !== sceneMatch.value) {
+    sceneSelect.value = sceneMatch.value;
+    sceneSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  const placementMatch = [...placementSelect.options].find(option => option.value.toLowerCase() === String(placement || '').trim().toLowerCase());
+  if (placementMatch) {
+    placementSelect.value = placementMatch.value;
+    placementSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  syncCombos();
+  saveBuilderState();
 }
 
 function userDataStatus(text, ok = true) {
@@ -581,12 +761,50 @@ function buildSelect(field) {
   field.options.forEach(o => { const option = document.createElement('option'); option.value = o.value; option.textContent = o.label; select.appendChild(option); });
   if (isCustomAllowed(field)) loadCustomValues(field).forEach(item => appendCustomOption(select, item));
   select.addEventListener('change', () => {
-    saveBuilderState();
+    if (field.id !== 'sceneElements') saveBuilderState();
     updateCustomRemoveState(select);
     if (field.id === 'aiTool') updateOpenToolButton();
-    if (field.id === 'aiTool' || field.id === 'category') { try { deriveRecommendation(getConfigValues()); } catch (_) {} }
+    if (field.id === 'sceneElements') { updatePlacementOptions(); saveBuilderState(); }
+    if (field.id === 'section' || field.id === 'category' || field.id === 'aiTool') { try { deriveRecommendation(getConfigValues()); } catch (_) {} }
   });
   return select;
+}
+
+function updatePlacementOptions() {
+  const sceneSelect = $('field-sceneElements');
+  const placementSelect = $('field-placement');
+  const placementField = CONFIG?.fields?.find(field => field.id === 'placement');
+  if (!sceneSelect || !placementSelect || !placementField) return;
+
+  const sceneField = CONFIG.fields.find(field => field.id === 'sceneElements');
+  const sceneGroup = sceneField?.options?.some(option => option.value === sceneSelect.value)
+    ? sceneSelect.value
+    : 'Custom';
+  const matching = placementField.options.filter(option => option.sceneElements?.includes(sceneGroup));
+  const currentValue = placementSelect.value;
+  const customValues = Array.from(placementSelect.options)
+    .filter(option => option.dataset.custom === 'true')
+    .map(option => ({ value: option.value, label: option.textContent }));
+
+  placementSelect.replaceChildren();
+  matching.forEach(option => {
+    const node = document.createElement('option');
+    node.value = option.value;
+    node.textContent = option.label;
+    placementSelect.appendChild(node);
+  });
+  customValues.forEach(option => appendCustomOption(placementSelect, option));
+
+  if (Array.from(placementSelect.options).some(option => option.value === currentValue)) {
+    placementSelect.value = currentValue;
+  } else {
+    const defaultValue = CONFIG.defaults?.placement;
+    placementSelect.value = Array.from(placementSelect.options).some(option => option.value === defaultValue)
+      ? defaultValue
+      : placementSelect.options[0]?.value || '';
+  }
+  updateCustomRemoveState(placementSelect);
+  syncCombos();
 }
 
 function buildTextarea(field) {
@@ -860,6 +1078,7 @@ function ensureConfigureFields() {
 
 function setDefaults() {
   Object.entries(CONFIG.defaults || {}).forEach(([key, value]) => { const el = $(`field-${key}`); if (el) el.value = value; });
+  updatePlacementOptions();
   syncCombos();
   renderPalette();
 }
@@ -1071,12 +1290,13 @@ function buildLocalPrompt(values) {
   const extra = String(values.clarification || '').trim();
   return [
     `Create a premium promotional ${values.category.toLowerCase()} banner for ${values.theme}.`,
-    `Character placement: ${values.composition.toLowerCase()}. Size: ${dims?.width || 1920}x${dims?.height || 700}.`,
+    `Scene elements: ${values.sceneElements || 'Custom'}. Placement: ${values.placement || 'Custom — specify in Clarification'}. Size: ${dims?.width || 1920}x${dims?.height || 700}.`,
     extra ? `Additional requirements: ${extra}` : '',
-    `Build the visual around one dominant focal point with cinematic lighting, depth, restrained supporting elements and generous negative space for copy.`,
+    `Build the visual around one dominant focal point with cinematic lighting, depth, restrained supporting elements and generous negative space.`,
     paletteColors.length ? `Use only these selected colors as the color palette: ${paletteColors.join(', ')}.` : '',
     desc ? `Reference direction: ${desc}` : `Reference direction: use the uploaded references as style and composition guidance without copying them.`,
-    `Keep the result premium, balanced, readable, scalable and production-ready. Avoid visual clutter, flat lighting, multiple focal points, busy backgrounds and cheap-looking text effects.`
+    `Keep the result premium, balanced, scalable and production-ready. Avoid visual clutter, flat lighting, multiple focal points and busy backgrounds.`,
+    `The image must contain no text, lettering, typography, logos, captions, labels, numbers, or UI/interface elements.`
   ].join('\n');
 }
 
@@ -1106,6 +1326,7 @@ function generateMockAnalysis() {
   $('statusBadge').textContent = refs.length ? 'Mock' : '';
   currentResult = { values, referenceDescription: visualNotes };
   $('finalPrompt').value = buildLocalPrompt(values);
+  updateBuilderActionStates();
   deriveRecommendation(values);
 }
 
@@ -1119,6 +1340,23 @@ function getSettings() {
   };
 }
 
+function updateBuilderActionStates() {
+  const model = $('model');
+  const hasConnectedModel = !!model?.value && !model.disabled;
+  const hasPrompt = !!$('finalPrompt')?.value.trim();
+  const setDisabled = (id, disabled) => { const button = $(id); if (button) button.disabled = !!disabled; };
+
+  setDisabled('analyzeBtn', !hasConnectedModel || aiActionBusy);
+  setDisabled('generateBtn', !hasConnectedModel || aiActionBusy);
+  setDisabled('copyReferencesBtn', !refs.length || $('copyReferencesBtn')?.dataset.busy === 'true');
+  setDisabled('copyGenerationDataBtn', !CONFIG?.fields?.length || $('copyGenerationDataBtn')?.dataset.busy === 'true');
+  setDisabled('copyPromptBtn', !hasPrompt);
+  setDisabled('copyPromptIcon', !hasPrompt);
+  setDisabled('copyJsonBtn', !CONFIG?.fields?.length);
+  setDisabled('openToolBtn', !hasPrompt);
+  setDisabled('addToTemplatesBtn', !hasPrompt || $('addToTemplatesBtn')?.dataset.busy === 'true');
+}
+
 async function loadImageFromDataUrl(dataUrl) {
   return await new Promise((resolve, reject) => {
     const img = new Image();
@@ -1126,6 +1364,184 @@ async function loadImageFromDataUrl(dataUrl) {
     img.onerror = () => reject(new Error('Could not read reference image for palette extraction.'));
     img.src = dataUrl;
   });
+}
+
+function getReferenceCompositionOptions() {
+  const sceneField = CONFIG?.fields?.find(field => field.id === 'sceneElements');
+  const placementField = CONFIG?.fields?.find(field => field.id === 'placement');
+  const sceneElementOptions = (sceneField?.options || []).map(option => option.value).filter(Boolean);
+  const placementOptionsByScene = Object.fromEntries(sceneElementOptions.map(scene => [
+    scene,
+    (placementField?.options || []).filter(option => option.sceneElements?.includes(scene)).map(option => option.value)
+  ]));
+  return { sceneElementOptions, placementOptionsByScene };
+}
+
+function buildReferenceAnalysisRequest(referenceCount = refs.length) {
+  const { sceneElementOptions, placementOptionsByScene } = getReferenceCompositionOptions();
+  const panels = Number(referenceCount) > 1
+    ? `This contact sheet contains ${referenceCount} numbered reference panels. Analyze each panel separately first, then compare them and report only traits shared across all panels. Refer to panels by their numbers while reasoning, but do not treat the panel labels as visual content from the references.`
+    : 'This contact sheet contains one reference panel. Analyze its visible content directly.';
+  return `${panels} Describe only visual characteristics clearly supported by the reference panels: style, subjects, composition, framing, color palette (up to 8 representative HEX colors), lighting, materials, textures, perspective, atmosphere, and depth. Ignore visible text, logos, UI, interface elements, and the contact-sheet panel labels. Do not use Builder settings or invent details. Do not write a final image-generation prompt. Classify the shared scene as one of ${sceneElementOptions.map(option => JSON.stringify(option)).join(', ')}. Choose placement only from the options associated with the selected scene type in this mapping: ${JSON.stringify(placementOptionsByScene)}. Return only valid JSON in this exact structure: {"description":"...","palette":["#RRGGBB"],"suggestions":{"style":"short visual style phrase","sceneElements":"...","placement":"..."}}.`;
+}
+
+async function resizeReferenceForClipboard(reference) {
+  const image = await loadImageFromDataUrl(reference.dataUrl);
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  const scale = Math.min(1, 500 / Math.max(sourceWidth, sourceHeight));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+  canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error(`Could not resize reference image "${reference.name}".`);
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return { name: reference.name, dataUrl: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height };
+}
+
+async function createReferenceContactSheet(images, instruction) {
+  if (!images.length) throw new Error('No reference images are available.');
+  const columns = images.length === 1 ? 2 : Math.min(3, Math.ceil(Math.sqrt(images.length)));
+  const rows = Math.ceil(images.length / columns);
+  const tileWidth = 520;
+  const tileHeight = 538;
+  const gutter = 16;
+  const canvas = document.createElement('canvas');
+  canvas.width = columns * tileWidth + (columns + 1) * gutter;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Could not prepare the reference contact sheet.');
+
+  const instructionPadding = 20;
+  const headerHeight = 24;
+  const lineHeight = 19;
+  const textWidth = canvas.width - gutter * 2 - instructionPadding * 2;
+  context.font = '14px Arial, sans-serif';
+  const instructionLines = [];
+  let line = '';
+  for (const word of String(instruction || '').split(/\s+/).filter(Boolean)) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (line && context.measureText(candidate).width > textWidth) {
+      instructionLines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line) instructionLines.push(line);
+  const instructionBlockHeight = instructionPadding * 2 + headerHeight + 8 + instructionLines.length * lineHeight;
+  const gridHeight = rows * tileHeight + (rows + 1) * gutter;
+  canvas.height = gutter + instructionBlockHeight + gridHeight;
+
+  context.fillStyle = '#e5e7eb';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = '#ffffff';
+  context.fillRect(gutter, gutter, canvas.width - gutter * 2, instructionBlockHeight);
+  context.fillStyle = '#111827';
+  context.font = '700 16px Arial, sans-serif';
+  context.textBaseline = 'top';
+  context.fillText('AI ANALYSIS REQUEST', gutter + instructionPadding, gutter + instructionPadding);
+  context.font = '14px Arial, sans-serif';
+  instructionLines.forEach((text, index) => {
+    context.fillText(text, gutter + instructionPadding, gutter + instructionPadding + headerHeight + 8 + index * lineHeight);
+  });
+
+  const gridTop = gutter + instructionBlockHeight;
+  for (let index = 0; index < images.length; index += 1) {
+    const imageData = images[index];
+    const image = await loadImageFromDataUrl(imageData.dataUrl);
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const x = images.length === 1
+      ? (canvas.width - tileWidth) / 2
+      : gutter + column * (tileWidth + gutter);
+    const y = gridTop + gutter + row * (tileHeight + gutter);
+    context.fillStyle = '#ffffff';
+    context.fillRect(x, y, tileWidth, tileHeight);
+    context.fillStyle = '#111827';
+    context.font = '600 16px Arial, sans-serif';
+    context.textBaseline = 'middle';
+    context.fillText(`Reference ${index + 1}`, x + 12, y + 17);
+
+    const imageWidth = image.naturalWidth || image.width;
+    const imageHeight = image.naturalHeight || image.height;
+    const scale = Math.min(1, 500 / imageWidth, 500 / imageHeight);
+    const drawWidth = imageWidth * scale;
+    const drawHeight = imageHeight * scale;
+    const drawX = x + (tileWidth - drawWidth) / 2;
+    const drawY = y + 30 + (500 - drawHeight) / 2;
+    context.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+  }
+
+  return await new Promise((resolve, reject) => {
+    canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not encode the reference contact sheet as PNG.')), 'image/png');
+  });
+}
+
+async function copyReferencesToClipboard() {
+  const button = $('copyReferencesBtn');
+  const status = $('referenceCopyStatus');
+  if (!button || button.disabled || !refs.length) return;
+  if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+    if (status) status.textContent = 'This browser cannot copy images. Open the app over HTTPS and use a browser with image clipboard support.';
+    return;
+  }
+
+  button.dataset.busy = 'true';
+  button.textContent = 'Preparing references…';
+  if (status) status.textContent = '';
+  updateBuilderActionStates();
+  try {
+    const request = buildReferenceAnalysisRequest(refs.length);
+    const resizedImages = Promise.all(refs.map(resizeReferenceForClipboard));
+    const contactSheetBlob = resizedImages.then(images => createReferenceContactSheet(images, request));
+    const clipboardItem = new ClipboardItem({
+      'image/png': contactSheetBlob
+    });
+    await navigator.clipboard.write([clipboardItem]);
+    if (status) status.textContent = 'Контактный лист с инструкцией скопирован как изображение. Вставьте его в ChatGPT.';
+  } catch (error) {
+    if (status) status.textContent = `Не удалось скопировать референсы: ${error.message}`;
+  } finally {
+    delete button.dataset.busy;
+    button.textContent = 'Copy image with prompt';
+    updateBuilderActionStates();
+  }
+}
+
+async function copyGenerationData() {
+  const button = $('copyGenerationDataBtn');
+  const status = $('generationCopyStatus');
+  if (!button || button.disabled) return;
+  button.dataset.busy = 'true';
+  button.textContent = 'Preparing request…';
+  if (status) status.textContent = '';
+  updateBuilderActionStates();
+  try {
+    const promptBlob = fetch('./api/generation-request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: getConfigValues(), referenceDescription: $('referenceDescription').value.trim() })
+    }).then(async response => {
+      if (!response.ok) throw new Error(await response.text());
+      const data = await response.json();
+      if (!data.prompt) throw new Error('The generation request is empty.');
+      return new Blob([data.prompt], { type: 'text/plain' });
+    });
+    if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
+      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': promptBlob })]);
+    } else if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(await (await promptBlob).text());
+    } else {
+      throw new Error('This browser does not allow clipboard access. Open the app over HTTPS and allow clipboard access.');
+    }
+    if (status) status.textContent = 'Данные для генерации промта скопированы в буфер обмена.';
+  } catch (error) {
+    if (status) status.textContent = `Не удалось скопировать запрос: ${error.message}`;
+  } finally {
+    delete button.dataset.busy;
+    button.textContent = 'Copy data for prompt generation';
+    updateBuilderActionStates();
+  }
 }
 
 function rgbToHex(r, g, b) {
@@ -1212,20 +1628,15 @@ async function analyzeReferences() {
   }
   // Mock mode never overrides a real Vision model. If a model is selected, send the images to AI.
   const images = refs.map(r => r.dataUrl);
-  const instruction = 'Analyze only the attached reference image(s), using visible image content as the sole source of truth. Return ONLY characteristics supported by the references. If multiple images are attached, describe ONLY characteristics they have in common and ignore one-off details. Identify the common visual style, recurring subject/object types, composition and placement, framing, lighting, materials, textures, perspective, atmosphere and depth. Also extract a representative color palette of no more than 8 HEX colors. For multiple references, include only colors or very close color families that are genuinely common across the reference set; for one reference, return its dominant representative colors. Do not use or infer any Builder settings. Do not invent unsupported details. Do not generate a final image prompt.';
+  const instruction = 'Analyze only the attached reference image(s), using visible image content as the sole source of truth. If multiple references are attached, analyze each image separately first, then compare them and describe ONLY characteristics they have in common; ignore one-off details. Identify the common visual style, recurring subject/object types, composition and placement, framing, lighting, materials, textures, perspective, atmosphere and depth. Also extract a representative color palette of no more than 8 HEX colors. For multiple references, include only colors or very close color families that are genuinely common across the reference set; for one reference, return its dominant representative colors. Do not use or infer any Builder settings. Do not invent unsupported details. Do not generate a final image prompt.';
   console.log('[Prompt Builder] Reference analysis instruction sent to AI:\n' + instruction);
   console.log('[Prompt Builder] Reference images sent: ' + images.length);
-  const compositionOptions = Array.from($('field-composition')?.options || []).map(o => o.value);
-  const res = await fetch('./api/analyze', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({settings, images, instruction, compositionOptions}) });
+  const compositionOptions = getReferenceCompositionOptions();
+  const res = await fetch('./api/analyze', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({settings, images, instruction, ...compositionOptions}) });
   if (!res.ok) { const t = await res.text(); throw new Error(t); }
   const data = await res.json();
-  $('referenceDescription').value = data.description || '';
-  setAiSuggestions(String(data?.suggestions?.style || ''), String(data?.suggestions?.composition || ''));
-  const aiPalette = Array.isArray(data.palette) ? data.palette.slice(0, 8) : [];
-  setReferencePalette(aiPalette);
-  console.log('[Prompt Builder] Palette returned by AI:', aiPalette);
-  $('statusBadge').textContent = 'Analyzed';
-  currentResult = { referenceDescription: data.description || '', palette: getPaletteColors() };
+  applyReferenceAnalysisResult(data, 'Analyzed');
+  console.log('[Prompt Builder] Palette returned by AI:', Array.isArray(data.palette) ? data.palette.slice(0, 8) : []);
   return data.description || '';
 }
 
@@ -1344,6 +1755,7 @@ function updateMockModeState() {
   mock.disabled = shouldDisable;
   mock.closest('.setting-row')?.classList.toggle('disabled-field', shouldDisable);
   if (shouldDisable) mock.checked = false;
+  updateBuilderActionStates();
 }
 
 function resetModelSelect() {
@@ -1351,6 +1763,7 @@ function resetModelSelect() {
   $('model').innerHTML = '<option value="">Connect provider to load Vision models</option>';
   $('model').disabled = true;
   $('model').value = '';
+  updateBuilderActionStates();
 }
 
 function initProviderSettings(defaultProviderId) {
@@ -1380,8 +1793,8 @@ function initProviderSettings(defaultProviderId) {
       $('connectionStatus').textContent = 'API key required';
     }
   });
-  $('baseUrl').addEventListener('input', () => $('connectionStatus').textContent = 'Not tested');
-  $('apiKey').addEventListener('input', () => { $('apiKey').dataset.verified = 'false'; $('connectionStatus').textContent = 'Not tested'; renderApiKeyHelp(); updateMockModeState(); });
+  $('baseUrl').addEventListener('input', () => { resetModelSelect(); $('connectionStatus').textContent = 'Not tested'; });
+  $('apiKey').addEventListener('input', () => { $('apiKey').dataset.verified = 'false'; resetModelSelect(); $('connectionStatus').textContent = 'Not tested'; renderApiKeyHelp(); updateMockModeState(); });
   $('mockMode').addEventListener('change', () => {
     const active = $('mockMode').checked;
     $('connectionStatus').textContent = active ? 'Mock mode enabled' : 'Not tested';
@@ -1534,10 +1947,18 @@ function renderRefs() {
   $('thumbs').innerHTML = refs.map((r,i)=>`<div class="thumb-wrap"><img class="thumb" src="${r.dataUrl}" title="${escapeAttr(r.name)}" data-i="${i}"><button type="button" class="remove-ref-btn" data-remove-ref="${i}" title="Remove reference" aria-label="Remove ${escapeAttr(r.name)}">×</button></div>`).join('');
   document.querySelectorAll('[data-remove-ref]').forEach(btn => btn.addEventListener('click', () => removeRef(Number(btn.dataset.removeRef))));
   $('statusBadge').textContent = refs.length ? `${refs.length} ref${refs.length>1?'s':''}` : '';
+  updateBuilderActionStates();
 }
 function escapeHtml(s){return String(s ?? '').replace(/[&<>\"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\\':'&#92;'}[m]))}
 function escapeAttr(s){return escapeHtml(s).replace(/'/g,'&#39;')}
-function copyText(text){navigator.clipboard.writeText(text)}
+async function copyText(text, successMessage='Copied to clipboard.') {
+  try {
+    await navigator.clipboard.writeText(String(text ?? ''));
+    $('statusBadge').textContent = successMessage;
+  } catch (error) {
+    $('statusBadge').textContent = `Could not copy to clipboard: ${error.message}`;
+  }
+}
 function showTab(id){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===id));
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active-view',v.id===id));
@@ -1583,26 +2004,49 @@ function loadPresetByName(name) {
   if (preset.values && typeof preset.values === 'object') applyPresetValues(preset.values);
   $('referenceDescription').value = preset.referenceDescription || '';
   if (preset.prompt != null) $('finalPrompt').value = preset.prompt;
+  updateBuilderActionStates();
   $('statusBadge').textContent = 'Preset loaded';
   saveBuilderState();
 }
 function applyPresetValues(values) {
   ensureConfigureFields();
+  const normalizedValues = { ...values };
+  const legacyComposition = String(normalizedValues.composition || '').trim();
+  if (!normalizedValues.sceneElements && legacyComposition) {
+    const characterPlacement = legacyComposition.match(/^Character\s+(left|center|right)$/i);
+    if (/^No character$/i.test(legacyComposition)) {
+      normalizedValues.sceneElements = 'Object only';
+      normalizedValues.placement ||= 'Center';
+    } else if (characterPlacement) {
+      normalizedValues.sceneElements = 'Character only';
+      normalizedValues.placement ||= characterPlacement[1][0].toUpperCase() + characterPlacement[1].slice(1).toLowerCase();
+    } else {
+      normalizedValues.sceneElements = 'Custom';
+      normalizedValues.placement ||= legacyComposition;
+    }
+  }
+  if (normalizedValues.category === 'Sportsbook') normalizedValues.category = 'Sportsbook Banners';
+  if (normalizedValues.category === 'Casino') normalizedValues.category = 'Casino Banners';
+  if (!normalizedValues.section && ['Sportsbook Banners', 'Casino Banners'].includes(normalizedValues.category)) {
+    normalizedValues.section = normalizedValues.category;
+  }
   for (const field of (CONFIG?.fields || [])) {
-    if (field.type === 'palette') { setReferencePalette(Array.isArray(values[field.id]) ? values[field.id] : []); continue; }
+    if (field.type === 'palette') { setReferencePalette(Array.isArray(normalizedValues[field.id]) ? normalizedValues[field.id] : []); continue; }
     const el = $(`field-${field.id}`);
-    if (!el || values[field.id] == null) continue;
-    if (el.tagName === 'SELECT' && isCustomAllowed(field) && !Array.from(el.options).some(o => o.value === values[field.id])) {
-      const item = normalizeCustomValue(field, values[field.id]);
-      if (item && item.value === values[field.id]) addCustomValue(field, el, item);
+    if (!el || normalizedValues[field.id] == null) continue;
+    if (el.tagName === 'SELECT' && isCustomAllowed(field) && !Array.from(el.options).some(o => o.value === normalizedValues[field.id])) {
+      const item = normalizeCustomValue(field, normalizedValues[field.id]);
+      if (item && item.value === normalizedValues[field.id]) addCustomValue(field, el, item);
     }
     // Skip values that no longer exist in a select (e.g. removed options from older presets).
-    if (el.tagName === 'SELECT' && !Array.from(el.options).some(o => o.value === values[field.id])) continue;
-    el.value = values[field.id];
+    if (el.tagName === 'SELECT' && !Array.from(el.options).some(o => o.value === normalizedValues[field.id])) continue;
+    el.value = normalizedValues[field.id];
     if (el.tagName === 'SELECT') updateCustomRemoveState(el);
+    if (field.id === 'sceneElements') updatePlacementOptions();
   }
+  updatePlacementOptions();
   syncCombos();
-  deriveRecommendation(values);
+  deriveRecommendation(normalizedValues);
 }
 
 async function savePreset() {
@@ -1639,17 +2083,24 @@ $('dropzone').addEventListener('dragover',e=>{e.preventDefault();$('dropzone').s
 $('dropzone').addEventListener('dragleave',()=>{$('dropzone').style.background=''});
 $('dropzone').addEventListener('drop',e=>{e.preventDefault();$('dropzone').style.background='';handleFiles(e.dataTransfer.files)});
 $('analyzeBtn').onclick=async()=>{
+  if ($('analyzeBtn').disabled) return;
+  aiActionBusy = true;
+  updateBuilderActionStates();
   showAiOverlay('Analyzing reference images with AI…');
-  try { await analyzeReferences(); } catch(e) { showConnectionError(`Analysis failed: ${e.message}`); } finally { hideAiOverlay(); }
+  try { await analyzeReferences(); } catch(e) { showConnectionError(`Analysis failed: ${e.message}`); } finally { hideAiOverlay(); aiActionBusy = false; updateBuilderActionStates(); }
 };
 $('generateBtn').onclick=async()=>{
+  if ($('generateBtn').disabled) return;
+  aiActionBusy = true;
+  updateBuilderActionStates();
   showAiOverlay('Generating final image prompt with AI…');
-  try { await generatePrompt(); } finally { hideAiOverlay(); }
+  try { await generatePrompt(); } finally { hideAiOverlay(); aiActionBusy = false; updateBuilderActionStates(); }
 };
-$('copyPromptBtn').onclick=()=>copyText($('finalPrompt').value);
-$('copyPromptIcon').onclick=()=>copyText($('finalPrompt').value);
-$('copyJsonBtn').onclick=()=>copyText(JSON.stringify({configuration:getConfigValues(), referenceDescription:$('referenceDescription').value, prompt:$('finalPrompt').value},null,2));
-$('copyRefBtn').onclick=()=>copyText($('referenceDescription').value);
+$('copyReferencesBtn').onclick=copyReferencesToClipboard;
+$('copyGenerationDataBtn').onclick=copyGenerationData;
+$('copyPromptBtn').onclick=()=>copyText($('finalPrompt').value, 'Prompt copied to clipboard.');
+$('copyPromptIcon').onclick=()=>copyText($('finalPrompt').value, 'Prompt copied to clipboard.');
+$('copyJsonBtn').onclick=()=>copyText(JSON.stringify({configuration:getConfigValues(), referenceDescription:$('referenceDescription').value, prompt:$('finalPrompt').value},null,2), 'Builder data copied as JSON.');
 $('presetMenuToggle').onclick=togglePresetMenu;
 $('presetName').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); loadPresetByName($('presetName').value.trim()); $('presetMenu').hidden = true; } });
 $('presetName').addEventListener('focus', () => { if (SAVED_PRESETS.length) renderPresetOptions(); });
@@ -1678,17 +2129,47 @@ function updateOpenToolButton() {
 }
 $('openToolBtn').onclick=async()=>{
   const prompt = $('finalPrompt').value.trim();
-  if (prompt) { try { await navigator.clipboard.writeText(prompt); } catch {} }
-  const url = $('openToolBtn').dataset.url;
-  if (!url) { $('statusBadge').textContent = 'Prompt copied (custom tool has no link)'; return; }
-  window.open(url,'_blank');
+  const baseUrl = $('openToolBtn').dataset.url;
+  if (!baseUrl) { $('statusBadge').textContent = 'This AI tool has no launch link.'; return; }
+  if (!prompt) { $('statusBadge').textContent = 'Generate a prompt first.'; return; }
+
+  // Reserve a tab during the click gesture so the async clipboard write won't trigger popup blocking.
+  const chatTab = window.open('about:blank', '_blank');
+  if (!chatTab) { $('statusBadge').textContent = 'Allow popups to open the selected AI tool.'; return; }
+
+  try {
+    await navigator.clipboard.writeText(prompt);
+    const chatUrl = new URL(baseUrl);
+    const host = chatUrl.hostname.toLowerCase();
+    const isChatGPT = host === 'chatgpt.com' || host.endsWith('.chatgpt.com') || host === 'chat.openai.com';
+    if (!isChatGPT) {
+      chatTab.location.replace(chatUrl.href);
+      $('statusBadge').textContent = 'Prompt copied to clipboard.';
+      return;
+    }
+    const fullPromptUrl = new URL(chatUrl.href);
+    fullPromptUrl.searchParams.set('q', prompt);
+
+    // Keep the full URL under a conservative 2,000-character limit.
+    const query = fullPromptUrl.href.length <= 2000
+      ? prompt
+      : 'The full prompt is copied to your clipboard. Please paste it into this chat.';
+    chatUrl.searchParams.set('q', query);
+    chatTab.location.replace(chatUrl.href);
+    $('statusBadge').textContent = fullPromptUrl.href.length <= 2000
+      ? 'Prompt copied and passed to ChatGPT.'
+      : 'Prompt copied. Paste it into ChatGPT from the clipboard.';
+  } catch (error) {
+    chatTab.close();
+    $('statusBadge').textContent = `Could not copy the prompt: ${error.message}`;
+  }
 };
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>showTab(t.dataset.tab));
 document.querySelector('.configure .section-head')?.addEventListener('click', () => {
   // Configure is intentionally non-collapsible. Verify the fields remain mounted.
   requestAnimationFrame(ensureConfigureFields);
 });
-$('apiKey').addEventListener('input', () => { $('apiKey').dataset.verified = 'false'; renderApiKeyHelp(); });
+    $('apiKey').addEventListener('input', () => { $('apiKey').dataset.verified = 'false'; renderApiKeyHelp(); });
 $('model').addEventListener('change', () => {
   if ($('model').value) {
     $('model').dataset.previous = $('model').value;
@@ -1696,6 +2177,10 @@ $('model').addEventListener('change', () => {
   }
   updateMockModeState();
 });
+$('referenceDescription').addEventListener('input', handleReferenceDescriptionInput);
+$('referenceDescription').addEventListener('paste', handleReferenceAnalysisPaste);
+$('finalPrompt').addEventListener('input', updateBuilderActionStates);
+updateBuilderActionStates();
 
 const BUILDER_STATE_KEY = 'pb-builder-state-v1';
 let __restoringBuilderState = false;
@@ -1715,6 +2200,7 @@ bindBuilderStatePersistence();
 $('applyAiSuggestionsBtn')?.addEventListener('click', applyAiSuggestions);
 loadAppVersion();
 $('templateAddBtn')?.addEventListener('click', addTemplate);
+$('addToTemplatesBtn')?.addEventListener('click', addBuilderResultTemplate);
 $('templateSaveBtn')?.addEventListener('click', saveTemplateFile);
 $('templateDuplicateBtn')?.addEventListener('click', duplicateTemplate);
 $('templateDeleteBtn')?.addEventListener('click', deleteTemplate);
@@ -1733,7 +2219,7 @@ $('importUserDataInput')?.addEventListener('change', async (e) => {
   finally { e.target.value = ''; }
 });
 
-loadTemplates().then(loadConfig).then(()=>{ restoreBuilderState(); updateOpenToolButton(); try { deriveRecommendation(getConfigValues()); } catch (_) {} }).catch(error => {
+loadTemplates().then(loadConfig).then(()=>{ restoreBuilderState(); updateOpenToolButton(); updateBuilderActionStates(); try { deriveRecommendation(getConfigValues()); } catch (_) {} }).catch(error => {
   console.error('[Prompt Builder] Startup failed:', error);
   const root = $('dynamicFields');
   const hint = location.protocol === 'file:' ? ' The page was opened from a file; serve the folder over HTTP (run "npm start" and open http://localhost:3000) or use GitHub Pages.' : ' Check that the web server is running and reload the page.';

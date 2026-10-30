@@ -60,9 +60,10 @@ export function selectPromptTemplate(config, aiTool) {
 }
 
 const ANALYZE_SYSTEM_PREFIX = `You are Prompt Builder's visual reference analyst. Analyze ONLY the attached image(s). Builder configuration is not provided and must not be used. `;
-const ANALYZE_SYSTEM_SUFFIX = ` Return valid JSON with exactly three fields: "description" (string), "palette" (array of 1 to 8 uppercase HEX colors in #RRGGBB format) and "suggestions" (object with two short strings: "style", a concise visual style phrase supported by the references, and "composition", the composition that best matches the references). The description must contain ONLY visual traits supported by visible evidence. If multiple images are provided, report ONLY traits shared across the references and omit one-off details. The palette must also represent the common color language across the set, not colors unique to one reference. If one image is provided, extract its dominant representative palette. Never invent objects, people, colors, layouts, themes, or visual attributes that are not visibly supported. Do not produce a final image-generation prompt. MANDATORY: the result must NOT contain any information about UI (interface elements, buttons, menus, icons, panels, widgets, layouts of screens) or about any text in the images (headlines, captions, labels, numbers, logos with lettering, typography, fonts, copy). Ignore them completely and do not mention that they exist; describe only the non-UI, non-text visual content, and do not take UI or text elements into account when building the palette.`;
+const ANALYZE_SYSTEM_SUFFIX = ` Return valid JSON with exactly three fields: "description" (string), "palette" (array of 1 to 8 uppercase HEX colors in #RRGGBB format) and "suggestions" (object with three strings: "style", a concise visual style phrase supported by the references; "sceneElements", the scene type best supported by the references; and "placement", a placement valid for that scene type). The description must contain ONLY visual traits supported by visible evidence. If multiple images are provided, report ONLY traits shared across the references and omit one-off details. The palette must also represent the common color language across the set, not colors unique to one reference. If one image is provided, extract its dominant representative palette. Never invent objects, people, colors, layouts, themes, or visual attributes that are not visibly supported. Do not produce a final image-generation prompt. MANDATORY: the result must NOT contain any information about UI (interface elements, buttons, menus, icons, panels, widgets, layouts of screens) or about any text in the images (headlines, captions, labels, numbers, logos with lettering, typography, fonts, copy). Ignore them completely and do not mention that they exist; describe only the non-UI, non-text visual content, and do not take UI or text elements into account when building the palette.`;
 
-const GENERATE_SYSTEM = `You are Prompt Builder's final image-prompt generator. The selected AI Tool template is the required output structure. Complete the template using the Builder configuration and Description of references. Do not replace the template with a different structure. Builder configuration contains explicit user requirements and has priority over reference observations when they conflict. Description of references contains only shared visual guidance extracted from the images. Preserve every meaningful configured requirement, fulfil the user's Clarification (additional requirements) when provided, use only selected Color Palette values when present, and apply Prompt Builder principles from the validated library: clear objective, strong visual hierarchy, one dominant focal point when compatible, concrete subject placement, controlled lighting/material/texture direction, useful negative constraints, restrained supporting elements, clear negative space, avoid clutter/overlap/duplication, and never copy unique artwork, exact text, logos, or unrelated details from references. MANDATORY: the result must NOT include any information about UI (interface elements, buttons, menus, icons, panels, screen layouts) or about any text in the images (headlines, captions, labels, numbers, typography, fonts). Ignore them completely, do not mention them and do not take them into account, even if the Description of references or the template mentions them. Return only the completed prompt in English, with no explanation, headings, markdown fences, or JSON.`;
+const REQUIRED_IMAGE_EXCLUSIONS = 'The image must contain no text, lettering, typography, logos, captions, labels, numbers, or UI/interface elements.';
+const GENERATE_SYSTEM = `You are Prompt Builder's final image-prompt generator. The selected AI Tool template is the required output structure. Complete the template using the Builder configuration and Description of references. Do not replace the template with a different structure. Builder configuration contains explicit user requirements and has priority over reference observations when they conflict. Description of references contains only shared visual guidance extracted from the images. Preserve every meaningful configured requirement, fulfil the user's Clarification (additional requirements) when provided, use only selected Color Palette values when present, and apply Prompt Builder principles from the validated library: clear objective, strong visual hierarchy, one dominant focal point when compatible, concrete subject placement, controlled lighting/material/texture direction, useful negative constraints, restrained supporting elements, clear negative space, avoid clutter/overlap/duplication, and never copy unique artwork, exact text, logos, or unrelated details from references. MANDATORY: the final image-generation prompt must explicitly include this sentence: "${REQUIRED_IMAGE_EXCLUSIONS}" Do not request visible text or UI elements, even if the Description of references or the template mentions them. Return only the completed prompt in English, with no explanation, headings, markdown fences, or JSON.`;
 
 // ctx: { providers: {id: providerConfig}, getApiKey(settings) -> string, log?(label, payload) }
 export function createCore(ctx) {
@@ -104,7 +105,7 @@ export function createCore(ctx) {
     const base = settings.baseUrl || provider.base_url;
     if (provider.id === 'ollama') return listOllamaModels(base, provider);
     if (provider.id === 'google') return listGoogleModels(base, apiKey, provider);
-    if (['openai', 'mistral', 'groq', 'openrouter', 'openai-compatible'].includes(provider.id)) return listOpenAIModels(base, apiKey, provider);
+    if (['openai', 'mistral', 'groq', 'openrouter', 'openai-compatible', 'lm-studio'].includes(provider.id)) return listOpenAIModels(base, apiKey, provider);
     throw new Error(`Unsupported provider: ${provider.id}`);
   }
 
@@ -193,7 +194,7 @@ export function createCore(ctx) {
     }
   }
 
-  async function analyze({ settings, images, instruction, compositionOptions }) {
+  async function analyze({ settings, images, instruction, sceneElementOptions, placementOptionsByScene, placementOptions, compositionOptions }) {
     if (!settings?.model) throw new Error('No Vision model selected');
     if (!Array.isArray(images) || !images.length) throw new Error('No reference images were received.');
     const normalized = images.map((url, index) => {
@@ -204,32 +205,60 @@ export function createCore(ctx) {
     const imageParts = normalized.map(img => ({ type: 'image_url', image_url: { url: `data:${img.mimeType};base64,${img.base64}` } }));
     const analysisInstruction = String(instruction || 'Analyze only the attached reference image(s). Treat the visible image content as the sole source of truth.');
     const system = `${ANALYZE_SYSTEM_PREFIX}${analysisInstruction}${ANALYZE_SYSTEM_SUFFIX}`;
-    const options = (Array.isArray(compositionOptions) ? compositionOptions : []).map(o => String(o || '').trim()).filter(Boolean).slice(0, 30);
-    const userText = `Analyze ${normalized.length} attached reference image${normalized.length === 1 ? '' : 's'} as a single reference set. Extract ONLY the common visual language and a representative palette of no more than 8 HEX colors. Return JSON only: {"description":"...","palette":["#RRGGBB"],"suggestions":{"style":"...","composition":"..."}}.${options.length ? ` The "composition" value must be exactly one of: ${options.map(o => JSON.stringify(o)).join(', ')}.` : ''} Do not include differences between images or any final generation instructions. Do not include any information about UI or texts in the result.`;
+    const sceneOptions = (Array.isArray(sceneElementOptions) ? sceneElementOptions : []).map(o => String(o || '').trim()).filter(Boolean);
+    const placementsByScene = placementOptionsByScene && typeof placementOptionsByScene === 'object' && !Array.isArray(placementOptionsByScene)
+      ? placementOptionsByScene
+      : {};
+    const fallbackOptions = (Array.isArray(placementOptions) ? placementOptions : Array.isArray(compositionOptions) ? compositionOptions : []).map(o => String(o || '').trim()).filter(Boolean);
+    const userText = `Analyze ${normalized.length} attached reference image${normalized.length === 1 ? '' : 's'} as a single reference set. If there are multiple images, analyze each image separately first, then compare them and report only traits shared across all images. Extract ONLY the common visual language and a representative palette of no more than 8 HEX colors. Return JSON only: {"description":"...","palette":["#RRGGBB"],"suggestions":{"style":"...","sceneElements":"...","placement":"..."}}.${sceneOptions.length ? ` The "sceneElements" value must exactly match one of: ${sceneOptions.map(o => JSON.stringify(o)).join(', ')}. The "placement" value must exactly match one of the placement options associated with that sceneElements value in this mapping: ${JSON.stringify(placementsByScene)}.` : ''}${fallbackOptions.length ? ` For legacy requests without scene options, "placement" must match one of: ${fallbackOptions.map(o => JSON.stringify(o)).join(', ')}.` : ''} Do not include differences between images or any final generation instructions. Do not include any information about UI or texts in the result.`;
     log('Reference analysis request', { provider: settings.provider, baseUrl: settings.baseUrl, model: settings.model, imageCount: normalized.length, systemPrompt: system, userPrompt: userText });
     const raw = await callVision(settings, [{ role: 'system', content: system }, { role: 'user', content: [{ type: 'text', text: userText }, ...imageParts] }]);
     const out = parseJsonText(raw);
     const palette = Array.isArray(out.palette)
       ? out.palette.map(c => String(c || '').trim().toUpperCase()).filter(c => /^#[0-9A-F]{6}$/.test(c)).slice(0, 8)
       : [];
+    const rawSceneElements = String(out.suggestions?.sceneElements || '').trim();
+    const sceneElements = sceneOptions.find(option => option.toLowerCase() === rawSceneElements.toLowerCase()) || '';
+    const validPlacements = Array.isArray(placementsByScene[sceneElements])
+      ? placementsByScene[sceneElements].map(option => String(option || '').trim()).filter(Boolean)
+      : fallbackOptions;
+    const rawPlacement = String(out.suggestions?.placement || out.suggestions?.composition || '').trim();
+    const placement = validPlacements.find(option => option.toLowerCase() === rawPlacement.toLowerCase()) || '';
     const suggestions = {
       style: String(out.suggestions?.style || '').trim().slice(0, 120),
-      composition: String(out.suggestions?.composition || '').trim().slice(0, 120)
+      sceneElements,
+      placement
     };
     return { description: out.description || raw, palette, suggestions };
   }
 
-  async function generate({ settings, values, referenceDescription, template: selectedTemplate }, config) {
-    if (!settings?.model) throw new Error('No Vision model selected');
+  function buildGenerationRequest({ values, referenceDescription, template: selectedTemplate }, config) {
     const aiTool = String(values?.aiTool || '').trim();
     const template = String(selectedTemplate || '').trim() || selectPromptTemplate(config, aiTool);
     if (!template) throw new Error(`No prompt template configured for AI Tool: ${aiTool || 'Unknown'}`);
     const configLines = Object.entries(values || {}).map(([key, value]) => formatGenerationValue(key, value)).join('\n');
-    const user = `AI TOOL: ${aiTool}\n\nPROMPT TEMPLATE\n${template}\n\nBUILDER CONFIGURATION\n${configLines || 'No configuration values provided.'}\n\nDESCRIPTION OF REFERENCES\n${referenceDescription || 'No reference description provided.'}\n\nComplete the template now. Fill its placeholders and sections using the supplied data. Output only the final ready-to-use image-generation prompt. Do not include any information about UI or texts in the result.`;
-    log('Final prompt generation request', { provider: settings.provider, baseUrl: settings.baseUrl, model: settings.model, aiTool, template, systemPrompt: GENERATE_SYSTEM, userPrompt: user });
-    const raw = await callVision(settings, [{ role: 'system', content: GENERATE_SYSTEM }, { role: 'user', content: user }]);
-    return { prompt: String(raw || '').trim(), aiTool, template, debug: { aiTool, template, systemPrompt: GENERATE_SYSTEM, userPrompt: user } };
+    const user = `AI TOOL: ${aiTool}\n\nPROMPT TEMPLATE\n${template}\n\nBUILDER CONFIGURATION\n${configLines || 'No configuration values provided.'}\n\nDESCRIPTION OF REFERENCES\n${referenceDescription || 'No reference description provided.'}\n\nComplete the template now. Fill its placeholders and sections using the supplied data. Output only the final ready-to-use image-generation prompt. Explicitly include this requirement: "${REQUIRED_IMAGE_EXCLUSIONS}".`;
+    return {
+      aiTool,
+      template,
+      systemPrompt: GENERATE_SYSTEM,
+      userPrompt: user,
+      clipboardPrompt: `SYSTEM INSTRUCTIONS\n${GENERATE_SYSTEM}\n\nUSER REQUEST\n${user}`
+    };
   }
 
-  return { listModels, verifyProvider, analyze, generate };
+  async function generate({ settings, values, referenceDescription, template: selectedTemplate }, config) {
+    if (!settings?.model) throw new Error('No Vision model selected');
+    const request = buildGenerationRequest({ values, referenceDescription, template: selectedTemplate }, config);
+    const { aiTool, template, systemPrompt, userPrompt } = request;
+    log('Final prompt generation request', { provider: settings.provider, baseUrl: settings.baseUrl, model: settings.model, aiTool, template, systemPrompt, userPrompt });
+    const raw = await callVision(settings, [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }]);
+    const generatedPrompt = String(raw || '').trim();
+    const prompt = generatedPrompt.toLowerCase().includes(REQUIRED_IMAGE_EXCLUSIONS.toLowerCase())
+      ? generatedPrompt
+      : [generatedPrompt, REQUIRED_IMAGE_EXCLUSIONS].filter(Boolean).join('\n\n');
+    return { prompt, aiTool, template, debug: { aiTool, template, systemPrompt, userPrompt } };
+  }
+
+  return { listModels, verifyProvider, analyze, generate, buildGenerationRequest };
 }
